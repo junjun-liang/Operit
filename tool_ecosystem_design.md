@@ -756,4 +756,49 @@ ToolPkg.registerPromptInputHook(definition)
 ToolPkg.registerPromptHistoryHook(definition)
 ToolPkg.registerSystemPromptComposeHook(definition)
 ToolPkg.registerToolPromptComposeHook(definition)
-ToolPkg.registerPromptFinalizeHook(def
+ToolPkg.registerPromptFinalizeHook(definition)
+ToolPkg.registerSummaryGenerateHook(definition)
+```
+
+---
+
+## 七、关键文件索引
+
+| 文件路径 | 职责 |
+|----------|------|
+| `app/src/main/java/com/ai/assistance/operit/core/tools/AIToolHandler.kt` | 工具统一注册中心，执行入口 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/ToolRegistration.kt` | 内置工具集中注册（100+工具） |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/ToolExecutor.kt` | 工具执行接口定义 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/AIToolHook.kt` | 工具生命周期钩子接口 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/ToolResultDataClasses.kt` | 工具结果数据类（60+类型） |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/ToolExecutionLimits.kt` | 执行限制常量 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/ToolProgressBus.kt` | 进度总线 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/packTool/PackageManager.kt` | JS工具包管理器 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/javascript/JsToolManager.kt` | JS引擎池管理器 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/javascript/JsEngine.kt` | JavaScript执行引擎 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/mcp/MCPToolExecutor.kt` | MCP协议工具执行器 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/mcp/MCPManager.kt` | MCP连接管理器 |
+| `app/src/main/java/com/ai/assistance/operit/ui/permissions/ToolPermissionSystem.kt` | 工具权限系统 |
+| `app/src/main/java/com/ai/assistance/operit/ui/permissions/PermissionRequestOverlay.kt` | 权限请求浮层 |
+| `app/src/main/java/com/ai/assistance/operit/core/tools/defaultTool/ToolGetter.kt` | 工具获取器/工厂 |
+| `docs/package_dev/toolpkg.md` | 工具包开发文档 |
+| `examples/types/toolpkg.d.ts` | ToolPkg类型定义 |
+
+---
+
+## 八、总结
+
+Operit 的工具生态系统通过**统一抽象**和**多源扩展**，实现了以下核心能力：
+
+1. **统一调用接口**：`AIToolHandler` 提供一致的工具注册、发现和执行接口，屏蔽底层差异
+2. **多源工具支持**：内置 Kotlin 工具、JS ToolPkg 工具包、MCP 协议工具三种来源无缝集成
+3. **自动包激活**：`packName:toolName` 格式自动触发包加载，实现按需激活
+4. **流式执行**：`invokeAndStream` 接口支持实时流式输出，满足长任务需求
+5. **权限管控**：三级权限+主开关+单工具覆盖，灵活且安全
+6. **生命周期钩子**：6 个钩子点覆盖工具调用全生命周期，支持监控和扩展
+7. **结果标准化**：60+ 种 `ToolResultData` 子类提供丰富的结构化输出
+8. **资源保护**：执行限制防止文件读取、结果长度等资源滥用
+9. **JS 引擎池**：4 引擎池化复用，避免频繁创建销毁
+10. **MCP 协议适配**：完整支持 MCP 的 text/image/resource 内容类型
+
+整个系统的设计充分体现了**"开放扩展、封闭修改"**的原则，通过 `ToolExecutor` 接口统一抽象，支持任意来源的工具接入，同时保持核心调用流程的稳定和一致。
