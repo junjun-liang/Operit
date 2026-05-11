@@ -196,6 +196,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics.android)
     // Vendored binary dependencies live in app/libs, including ffmpeg-kit and its Java-side deps.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    
     implementation(libs.androidx.runtime.android)
     implementation(libs.androidx.ui.text.android)
     implementation(libs.androidx.animation.android)
