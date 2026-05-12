@@ -1,8 +1,8 @@
-# Operit 工具生态系统设计思想与详细流程分析
+# Operit 工具系统设计思想与详细流程分析
 
 ## 一、设计思想概述
 
-Operit 的工具生态系统采用**"统一注册中心 + 多源扩展 + 权限管控 + 流式执行"**的架构设计，核心设计思想包括：
+Operit 的工具系统采用**"统一注册中心 + 多源扩展 + 权限管控 + 流式执行"**的架构设计，核心设计思想包括：
 
 1. **统一工具注册中心**：`AIToolHandler` 作为单例对象，集中管理所有工具的注册、发现和执行，提供一致的调用接口
 2. **多源工具扩展**：支持内置工具（Kotlin）、JS 工具包（ToolPkg）、MCP 协议工具三种来源，通过统一接口无缝集成
@@ -199,35 +199,35 @@ classDiagram
 
 ```mermaid
 erDiagram
-    AITOOL ||--o{ TOOLPARAM : "包含"
-    AITOOL ||--|| TOOLRESULT : "产生"
-    TOOLRESULT ||--|| TOOLRESULTDATA : "包含"
-    TOOLRESULTDATA ||--o{ FILEENTRY : "包含"
-
+    AITOOL["AITool"] ||--o{ TOOLPARAM["ToolParameter"] : "包含"
+    AITOOL ||--|| TOOLRESULT["ToolResult"] : "产生"
+    TOOLRESULT ||--|| TOOLRESULTDATA["ToolResultData"] : "包含"
+    TOOLRESULTDATA ||--o{ FILEENTRY["FileEntry"] : "包含"
+    
     AITOOL {
         string name
         string description
         list parameters
     }
-
+    
     TOOLPARAM {
         string name
         string value
         string type
         boolean required
     }
-
+    
     TOOLRESULT {
         string toolName
         boolean success
         ToolResultData result
         string error
     }
-
+    
     TOOLRESULTDATA {
         string __type
     }
-
+    
     FILEENTRY {
         string name
         boolean isDirectory
@@ -788,7 +788,7 @@ ToolPkg.registerSummaryGenerateHook(definition)
 
 ## 八、总结
 
-Operit 的工具生态系统通过**统一抽象**和**多源扩展**，实现了以下核心能力：
+Operit 的工具系统通过**统一抽象**和**多源扩展**，实现了以下核心能力：
 
 1. **统一调用接口**：`AIToolHandler` 提供一致的工具注册、发现和执行接口，屏蔽底层差异
 2. **多源工具支持**：内置 Kotlin 工具、JS ToolPkg 工具包、MCP 协议工具三种来源无缝集成
