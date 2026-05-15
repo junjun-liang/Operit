@@ -1145,7 +1145,972 @@ processFileBinding(originalContent, aiGeneratedCode)
 
 ---
 
-## 九、完整架构图（Mermaid）
+## 九、记忆系统设计
+
+### 9.1 系统架构总览
+
+Operit 的记忆系统是一个基于**知识图谱**的长期记忆管理架构，支持多路混合搜索、自动知识提取和语义向量索引：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          UI 层                                               │
+│  MemoryScreen / MemoryViewModel / GraphVisualizer / FolderNavigator          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          工具执行层                                          │
+│  MemoryQueryToolExecutor (AI 工具接口，11 个工具)                             │
+│  ToolRegistration (工具注册)                                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          业务逻辑层                                          │
+│  MemoryLibrary (核心：分析对话 + 构建知识图谱)                                 │
+│  MemoryAutoSaveScheduler (定时自动保存，60s tick)                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          数据存储层                                          │
+│  MemoryRepository (CRUD + 混合搜索 + 向量索引)                               │
+│  MemoryAutoSaveCandidateRepository (候选队列)                                │
+│  ObjectBoxManager (ObjectBox 数据库，按 profileId 隔离)                      │
+│  CloudEmbeddingService (云端 Embedding 生成)                                 │
+│  VectorIndexManager (HNSW 向量索引)                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          数据模型层                                          │
+│  Memory / MemoryTag / MemoryLink / MemoryProperty                           │
+│  DocumentChunk / Embedding / MemoryAutoSaveCandidate                        │
+│  MemorySearchConfig / MemoryScoreMode                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 数据模型
+
+#### 9.2.1 核心实体关系
+
+```mermaid
+erDiagram
+    Memory ||--o{ MemoryTag : "tags"
+    Memory ||--o{ MemoryProperty : "properties"
+    Memory ||--o{ MemoryLink : "outgoing links"
+    Memory ||--o{ MemoryLink : "incoming backlinks"
+    Memory ||--o{ DocumentChunk : "document chunks"
+    MemoryTag ||--o| MemoryTag : "parent"
+    MemoryLink }o--|| Memory : "source"
+    MemoryLink }o--|| Memory : "target"
+    DocumentChunk }o--|| Memory : "memory"
+
+    Memory {
+        Long id PK
+        String uuid
+        String title
+        String content
+        String contentType
+        String source
+        Float credibility
+        Float importance
+        String folderPath
+        Boolean isDocumentNode
+        Embedding embedding
+        Date createdAt
+        Date updatedAt
+    }
+
+    MemoryTag {
+        Long id PK
+        String name
+    }
+
+    MemoryLink {
+        Long id PK
+        String type
+        Float weight
+        String description
+    }
+
+    MemoryProperty {
+        Long id PK
+        String key
+        String value
+    }
+
+    DocumentChunk {
+        Long id PK
+        String content
+        Int chunkIndex
+        Embedding embedding
+    }
+```
+
+#### 9.2.2 Memory 实体
+
+```kotlin
+@Entity
+data class Memory(
+    @Id var id: Long = 0,
+    var uuid: String = UUID.randomUUID().toString(),
+    var title: String = "",              // 简短标题/摘要
+    var content: String = "",            // 详细内容
+    var contentType: String = "text/plain",
+    var source: String = "unknown",      // 来源 (user_input, chat_summary, memory_analysis 等)
+    var credibility: Float = 0.5f,       // 可信度 0.0-1.0
+    var importance: Float = 0.5f,        // 重要性 0.0-1.0
+    var documentPath: String? = null,    // 外部文档路径
+    var isDocumentNode: Boolean = false, // 是否代表外部文档
+    @Index var folderPath: String? = null, // 文件夹路径分类
+    var embedding: Embedding? = null,    // 向量嵌入
+    var createdAt: Date = Date(),
+    var updatedAt: Date = Date(),
+    var lastAccessedAt: Date = Date()
+)
+```
+
+**关系**：
+- `tags: ToMany<MemoryTag>` — 标签（多对多）
+- `properties: ToMany<MemoryProperty>` — 键值对属性
+- `links: ToMany<MemoryLink>` — 出边关联
+- `backlinks: ToMany<MemoryLink>` — 入边关联（反向链接）
+- `documentChunks: ToMany<DocumentChunk>` — 文档分块
+
+#### 9.2.3 关联与标签
+
+**MemoryLink** — 定义记忆间关系：
+```kotlin
+@Entity
+data class MemoryLink(
+    @Id var id: Long = 0,
+    var type: String = "related",   // 关联类型 (causes, explains, part_of 等)
+    var weight: Float = 1.0f,       // 关联强度 0.0-1.0
+    var description: String = ""
+)
+```
+
+**MemoryTag** — 支持层级结构：
+```kotlin
+@Entity
+data class MemoryTag(
+    @Id var id: Long = 0,
+    var name: String = ""
+) {
+    lateinit var parent: ToOne<MemoryTag>    // 父标签
+    lateinit var memories: ToMany<Memory>    // 该标签下的记忆
+}
+```
+
+### 9.3 存储层设计
+
+#### 9.3.1 ObjectBox 数据库
+
+记忆系统使用 **ObjectBox**（非 Room）作为数据库，按 `profileId` 隔离存储：
+
+```kotlin
+object ObjectBoxManager {
+    private val stores = ConcurrentHashMap<String, BoxStore>()
+
+    fun get(context: Context, profileId: String): BoxStore {
+        // 每个 profileId 有独立目录：objectbox_profiles/{profileId}
+        // "default" profile 使用 "objectbox" 目录（向后兼容）
+        MyObjectBox.builder()
+            .androidContext(context.applicationContext)
+            .directory(dbDir)
+            .build()
+    }
+}
+```
+
+#### 9.3.2 MemoryRepository
+
+[MemoryRepository.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/data/repository/MemoryRepository.kt) 是记忆系统的核心存储层（约 2814 行），提供完整的 CRUD + 搜索 + 向量索引能力：
+
+```
+MemoryRepository
+    │
+    ├──► CRUD 操作
+    │       saveMemory() / findMemoryById() / findMemoryByTitle() / deleteMemory()
+    │       createMemory() / updateMemory() / mergeMemories()
+    │
+    ├──► Link 操作
+    │       linkMemories() / queryMemoryLinks() / updateLink() / deleteLink()
+    │
+    ├──► Tag 操作
+    │       addTagToMemory()
+    │
+    ├──► 文件夹操作
+    │       getAllFolderPaths() / getMemoriesByFolderPath()
+    │       createFolder() / renameFolder() / deleteFolder() / moveMemoriesToFolder()
+    │
+    ├──► 文档操作
+    │       createMemoryFromDocument() / getChunksForMemory()
+    │       searchChunksInDocument() / updateChunk()
+    │
+    ├──► 混合搜索
+    │       searchMemories() / runSearchMemoriesWithDebug()
+    │
+    ├──► 向量索引
+    │       rebuildAllMemoryVectorIndices() / rebuildDocumentChunkIndex()
+    │       addMemoryToIndexInternal()
+    │
+    └──► 导入导出
+            exportMemoriesToJson() / importMemoriesFromJson(strategy)
+                    • SKIP / UPDATE / CREATE_NEW 三种策略
+```
+
+### 9.4 混合搜索算法
+
+记忆搜索采用**多路召回 + RRF 融合**的混合搜索策略：
+
+```mermaid
+flowchart TD
+    Query[查询文本] --> Split[splitSearchKeywords<br/>关键词拆分]
+    Split --> Jieba[expandKeywordToken<br/>Jieba 中文分词扩展]
+
+    Jieba --> Keyword[关键词搜索<br/>标题包含查询片段<br/>RRF: 1/K+rank × importance × weight]
+    Jieba --> Tag[标签搜索<br/>标签名匹配查询片段]
+    Jieba --> Reverse[反向包含搜索<br/>查询文本包含记忆标题]
+
+    Query --> Embed[CloudEmbeddingService<br/>生成查询 Embedding]
+    Embed --> Semantic[语义搜索<br/>HNSW 近似最近邻<br/>cosineSimilarity 排序]
+
+    Keyword --> RRF[RRF 融合]
+    Tag --> RRF
+    Reverse --> RRF
+    Semantic --> RRF
+
+    RRF --> GraphExpand[图谱扩展<br/>Top-10 种子节点<br/>沿 links/backlinks 传播分数]
+    GraphExpand --> Filter[阈值过滤<br/>relevanceThreshold ≥ 0.025]
+    Filter --> Result[排序结果]
+```
+
+#### 搜索权重配置
+
+```kotlin
+enum class MemoryScoreMode { BALANCED, KEYWORD_FIRST, SEMANTIC_FIRST }
+
+// 权重解析
+MemoryScoreMode.BALANCED       -> (keyword=1.0x, semantic=1.0x, edge=1.0x)
+MemoryScoreMode.KEYWORD_FIRST  -> (keyword=1.3x, semantic=0.8x, edge=0.9x)
+MemoryScoreMode.SEMANTIC_FIRST -> (keyword=0.8x, semantic=1.3x, edge=1.1x)
+```
+
+#### 向量索引
+
+- 使用 **HNSW** (Hierarchical Navigable Small World) 算法
+- 按维度分索引文件：`memory_hnsw_{profileId}_{dimension}.idx`
+- 文档区块索引：`doc_index_{profileId}_{memoryId}_{dimension}.hnsw`
+- 增量更新时采用**重建策略**而非增量添加
+
+#### Embedding 生成
+
+- 使用云端 Embedding API（OpenAI 兼容格式）
+- 记忆保存时自动生成 embedding
+- 文档分块独立生成 embedding
+- 支持批量重建
+
+### 9.5 AI 工具接口
+
+#### 9.5.1 工具列表
+
+AI 可通过以下 11 个工具操作记忆库：
+
+| 工具名 | 功能 | 参数 |
+|--------|------|------|
+| `query_memory` | 搜索记忆 | query, folder_path, threshold, snapshot_id |
+| `get_memory_by_title` | 精确标题检索 | title, include_content |
+| `create_memory` | 创建记忆 | title, content, tags, folder_path |
+| `update_memory` | 更新记忆 | old_title, new_title, new_content |
+| `delete_memory` | 删除记忆 | title |
+| `move_memory` | 移动到文件夹 | title, folder_path |
+| `link_memories` | 创建关联 | source_title, target_title, type, description |
+| `query_memory_links` | 查询关联 | title, type |
+| `update_memory_link` | 更新关联 | source, target, type, weight |
+| `delete_memory_link` | 删除关联 | source, target, type |
+| `update_user_preferences` | 更新用户偏好 | key-value pairs |
+
+#### 9.5.2 Snapshot 去重机制
+
+`query_memory` 支持 `snapshot_id` 参数，跨多次查询排除已返回的记忆，避免 AI 在同一轮对话中重复获取相同记忆。
+
+#### 9.5.3 工具提示词分层
+
+| 分类 | 工具 | 可见性 |
+|------|------|--------|
+| **基础记忆工具** | query_memory, get_memory_by_title | 始终可见（公开分类） |
+| **扩展记忆工具** | create/update/delete/link 等 | 内部工具分类 |
+
+### 9.6 自动知识提取
+
+#### 9.6.1 MemoryLibrary — 核心智能层
+
+[MemoryLibrary.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/api/chat/library/MemoryLibrary.kt) 负责从对话中自动提取知识图谱：
+
+```
+saveMemory() 核心流程
+    │
+    ├──► 1. 裁剪对话历史
+    │       去除 system 消息、清理 <memory> 标签、精简工具结果
+    │
+    ├──► 2. generateAnalysis() — AI 分析对话
+    │       │
+    │       ├── buildCandidateSearchQuery() — 构建搜索查询
+    │       ├── memoryRepository.searchMemories() — 检索相关候选（最多 15 条）
+    │       ├── findAndDescribeDuplicates() — 检测重复记忆
+    │       ├── FunctionalPrompts.buildKnowledgeGraphExtractionPrompt() — 构建提取提示词
+    │       └── parseAnalysisResult() — 解析 AI JSON 结果
+    │
+    ├──► 3. 执行合并操作（mergedEntities）
+    │
+    ├──► 4. 执行更新操作（updatedEntities）
+    │
+    ├──► 5. 更新用户偏好（userPreferences）
+    │
+    ├──► 6. 创建主要问题记忆节点（mainProblem）
+    │
+    ├──► 7. 处理提取的实体（extractedEntities）
+    │       支持别名去重（aliasFor）
+    │
+    └──► 8. 创建记忆间的关联（links）
+```
+
+#### 9.6.2 AI 分析返回的 JSON 结构
+
+```json
+{
+  "main": ["标题", "内容", ["标签"], "文件夹路径"],
+  "new": [["标题", "内容", ["标签"], "文件夹", "别名指向"]],
+  "links": [["源标题", "目标标题", "关联类型", "描述", 权重]],
+  "update": [["要更新的标题", "新内容", "原因", 可信度, 重要性]],
+  "merge": [{"source_titles": [...], "new_title": "...", "new_content": "...", "reason": "..."}],
+  "user": {"age": "...", "gender": "...", "personality": "..."}
+}
+```
+
+#### 9.6.3 自动分类
+
+`autoCategorizeMemories()` 方法：
+- 查找所有未分类记忆（folderPath 为空）
+- 分批（每批 10 条）调用 AI 进行分类
+- AI 返回 JSON 数组 `[{"title": "...", "folder": "..."}]`
+- 更新记忆的 folderPath 并重新生成 embedding
+
+### 9.7 自动保存调度
+
+#### 9.7.1 触发机制
+
+```
+AI 回复完成
+    ↓
+EnhancedAIService.finalizeReply()
+    ↓
+if (enableMemoryAutoUpdate && !isSubTask && content.isNotBlank())
+    MemoryAutoSaveCandidateRepository.enqueue(chatId, timestamp)
+```
+
+#### 9.7.2 MemoryAutoSaveScheduler
+
+```mermaid
+flowchart TD
+    Start[启动] --> Tick[每 60s tick]
+    Tick --> Profiles[遍历所有 profile]
+    Profiles --> CheckTime{到达运行时间?}
+    CheckTime -->|否| Tick
+    CheckTime -->|是| GetCandidates[获取 pending/failed 候选]
+    GetCandidates --> CheckCount{候选 ≥ 5 条?}
+    CheckCount -->|否| Tick
+    CheckCount -->|是| GroupBy[按 chatId 分组]
+    GroupBy --> Load[加载最近 48 条消息]
+    Load --> Save[MemoryLibrary.saveMemoryNow]
+    Save --> Success{成功?}
+    Success -->|是| DeleteCand[删除候选]
+    Success -->|否| MarkFailed[标记为 failed]
+    DeleteCand --> Tick
+    MarkFailed --> Tick
+```
+
+**配置**：自动保存间隔默认 15 分钟，范围 1-180 分钟。
+
+### 9.8 记忆与对话的集成
+
+记忆通过**附件机制**注入到对话中：
+
+```kotlin
+// AttachmentDelegate.kt
+suspend fun captureMemoryFolders(folderPaths: List<String>) {
+    val memoryContext = buildMemoryContextXml(folderPaths)
+    // 创建附件: fileName="memory_context.xml", mimeType="application/xml"
+}
+
+private fun buildMemoryContextXml(folderPaths: List<String>): String {
+    return """
+<memory_context>
+ <available_folders>
+  - folder1
+  - folder2
+ </available_folders>
+ <instruction>
+- **CRITICAL**: To search within the folders listed above, you **MUST** use the `query_memory` tool...
+- Example: <tool name="query_memory"><param name="query">search query</param><param name="folder_path">folder1</param></tool>
+ </instruction>
+</memory_context>"""
+}
+```
+
+**集成流程**：
+
+```
+用户选择记忆文件夹 → AttachmentDelegate.captureMemoryFolders()
+    ↓
+buildMemoryContextXml() → 生成 <memory_context> XML 附件
+    ↓
+附件注入对话 → AI 读取后使用 query_memory 工具主动搜索记忆
+```
+
+### 9.9 完整记忆系统流程图
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant AI as AI Agent
+    participant ML as MemoryLibrary
+    participant MR as MemoryRepository
+    participant CES as CloudEmbeddingService
+    participant VI as VectorIndexManager
+
+    Note over User,VI: 写入流程（自动知识提取）
+
+    User->>AI: 发送消息
+    AI->>AI: 回复完成
+    AI->>ML: enqueue(chatId, timestamp)
+    ML->>ML: 定时触发 saveMemoryNow()
+    ML->>ML: generateAnalysis() — AI 分析对话
+    ML->>MR: searchMemories() — 检索相关候选
+    MR-->>ML: 候选记忆列表
+    ML->>ML: parseAnalysisResult() — 解析 JSON
+    ML->>MR: saveMemory() — 创建新记忆
+    MR->>CES: generateEmbedding(content)
+    CES-->>MR: Embedding(FloatArray)
+    MR->>VI: addMemoryToIndex()
+    MR->>MR: linkMemories() — 创建关联
+    MR-->>ML: 保存完成
+
+    Note over User,VI: 读取流程（AI 主动查询）
+
+    User->>AI: "我记得之前讨论过..."
+    AI->>MR: query_memory(query="讨论内容")
+    MR->>MR: 关键词搜索 + 标签搜索
+    MR->>CES: generateEmbedding(query)
+    CES-->>MR: queryEmbedding
+    MR->>VI: findNearest(queryEmbedding, k)
+    VI-->>MR: 相似记忆 ID 列表
+    MR->>MR: 图谱扩展 + RRF 融合
+    MR-->>AI: 排序后的记忆结果
+    AI-->>User: 基于记忆的回答
+```
+
+---
+
+## 十、对话系统设计
+
+### 10.1 系统架构总览
+
+Operit 的对话系统采用**分层委托架构**，将复杂的聊天业务拆分为 6 个独立 Delegate，由 ChatServiceCore 统一协调：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          UI 层                                               │
+│  ChatViewModel / AIChatScreen / FloatingChatService                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          服务协调层                                          │
+│  ChatServiceCore (组合 6 Delegates + EnhancedAIService)                      │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────────────┐    │
+│  │UiStateDelegate│ │ApiConfigDel  │ │TokenStatisticsDelegate           │    │
+│  │(UI 状态)      │ │(API 配置)    │ │(Token 统计)                      │    │
+│  └──────────────┘ └──────────────┘ └──────────────────────────────────┘    │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────────────┐    │
+│  │AttachmentDel │ │ChatHistoryDel│ │MessageProcessingDelegate         │    │
+│  │(附件管理)    │ │(历史管理)    │ │(消息处理/流式收集)               │    │
+│  └──────────────┘ └──────────────┘ └──────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │MessageCoordinationDelegate (总结/续聊/Token超限/群组编排)              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          AI 消息管理层                                       │
+│  AIMessageManager (准备响应流 / 角色卡解析 / 取消操作)                        │
+│  EnhancedAIService (ReAct 循环 / 工具检测执行 / 流式处理)                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          对话准备层                                          │
+│  ConversationService (历史准备 / XML 标签拆分 / 对话总结)                     │
+│  SystemPromptConfig (动态系统提示词构建)                                      │
+│  ConversationRoundManager (轮次管理)                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          数据持久层                                          │
+│  ChatHistoryManager (Repository)                                             │
+│  AppDatabase → ChatDao / MessageDao / MessageVariantDao                      │
+│  CharacterCardManager (DataStore)                                            │
+│  TokenCacheManager (公共前缀缓存优化)                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 数据模型
+
+#### 10.2.1 核心实体关系
+
+```mermaid
+erDiagram
+    ChatEntity ||--o{ MessageEntity : "messages"
+    MessageEntity ||--o{ MessageVariantEntity : "variants"
+    ChatEntity {
+        String id PK
+        String title
+        Long createdAt
+        Long updatedAt
+        Int inputTokens
+        Int outputTokens
+        Int currentWindowSize
+        String group
+        String workspace
+        String parentChatId
+        String characterCardName
+        String characterGroupId
+        Boolean locked
+    }
+    MessageEntity {
+        Long messageId PK
+        String chatId FK
+        String sender
+        String content
+        Long timestamp
+        Int orderIndex
+        String roleName
+        String provider
+        String modelName
+        Int inputTokens
+        Int outputTokens
+    }
+    MessageVariantEntity {
+        Long id PK
+        Long messageTimestamp FK
+        String content
+        Int variantIndex
+    }
+```
+
+#### 10.2.2 ChatMessage — 核心消息实体
+
+```kotlin
+@Serializable
+data class ChatMessage(
+    val sender: String,                    // "user" or "ai"
+    var content: String = "",
+    val timestamp: Long = ChatMessageTimestampAllocator.next(),
+    val roleName: String = "",             // 角色名字段
+    val selectedVariantIndex: Int = 0,     // 当前选中的回答版本
+    val variantCount: Int = 1,             // 可切换的回答版本数量
+    val provider: String = "",             // 供应商
+    val modelName: String = "",            // 模型名称
+    val inputTokens: Int = 0,              // 本轮输入 token
+    val outputTokens: Int = 0,             // 本轮输出 token
+    val cachedInputTokens: Int = 0,        // 缓存命中的输入 token
+    val sentAt: Long = 0L,                 // 请求发送时间
+    val outputDurationMs: Long = 0L,       // 输出耗时
+    val waitDurationMs: Long = 0L,         // 等待首包耗时
+    val displayMode: ChatMessageDisplayMode = NORMAL,
+    val isFavorite: Boolean = false,
+    @Transient val contentStream: Stream<String>? = null  // 流式内容
+)
+```
+
+#### 10.2.3 PromptTurn — 对话轮次抽象
+
+```kotlin
+enum class PromptTurnKind {
+    SYSTEM, USER, ASSISTANT, TOOL_CALL, TOOL_RESULT, SUMMARY
+}
+
+data class PromptTurn(
+    val kind: PromptTurnKind,
+    val content: String,
+    val toolName: String? = null,
+    val metadata: Map<String, Any?> = emptyMap()
+)
+```
+
+扩展函数：
+- `mergeAdjacentTurns()` — 合并相邻同类型轮次（排除 SYSTEM/TOOL_CALL/TOOL_RESULT）
+- `appendUserTurnIfMissing()` — 确保末尾有用户轮次
+
+### 10.3 六 Delegate 架构
+
+| Delegate | 职责 | 核心方法 |
+|----------|------|----------|
+| **UiStateDelegate** | UI 状态管理 | 错误消息、Toast、权限级别、文件选择器 |
+| **ApiConfigDelegate** | API 配置管理 | API Key、端点、模型名、上下文长度、思维模式、总结阈值 |
+| **TokenStatisticsDelegate** | Token 统计 | 按 chatId 维护累计 token 计数和窗口大小 |
+| **AttachmentDelegate** | 附件管理 | 文件/图片/位置附件、OCR 识别、记忆文件夹注入 |
+| **ChatHistoryDelegate** | 聊天历史管理 | 聊天列表、消息窗口分页、创建/删除/切换聊天 |
+| **MessageProcessingDelegate** | 消息处理 | 消息发送/接收、流式收集、工具调用循环、重新生成变体 |
+| **MessageCoordinationDelegate** | 消息协调 | 总结触发/取消、Token 超限处理、自动续聊、群组编排 |
+
+### 10.4 对话历史管理
+
+#### 10.4.1 ConversationService — 历史准备
+
+[ConversationService.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ConversationService.kt) 将 ChatMessage 列表转换为 PromptTurn 列表：
+
+```
+prepareConversationHistory()
+    │
+    ├──► 1. dispatchHistoryHooks(before_prepare_history)
+    │
+    ├──► 2. 处理每条消息
+    │       ├── processChatMessageWithTools() — 按 XML 标签拆分
+    │       │   ├── <think(ing)> → ASSISTANT 消息（思考内容）
+    │       │   ├── <tool> → TOOL_CALL 消息
+    │       │   ├── <tool_result> → TOOL_RESULT 消息
+    │       │   └── <status> → 根据 type 决定角色
+    │       ├── 合并相邻同角色消息
+    │       └── 规范化 tool_result 格式
+    │
+    ├──► 3. dispatchHistoryHooks(after_prepare_history)
+    │
+    └──► 4. 返回 List<PromptTurn>
+```
+
+#### 10.4.2 XML 标签处理
+
+ChatMarkupRegex 定义了对话中的 XML 标签正则：
+
+| 标签 | 正则 | 用途 |
+|------|------|------|
+| `<tool name="...">` | `toolCallPattern` | 工具调用 |
+| `<tool_result>` | `toolResultTag` | 工具结果 |
+| `<think(ing)>` | `thinkTag` | AI 思考过程 |
+| `<status>` | `statusTag` | 状态指示 |
+
+**随机标签名**：`generateRandomToolTagName()` 生成随机后缀（如 `tool_Ab3x`），避免模型输出固定格式，`normalizeToolLikeTagName()` 将其归一化。
+
+#### 10.4.3 角色隔离模式
+
+在群组编排中，不同角色的消息需要隔离：
+
+```
+非角色隔离模式：
+  所有 ai 消息 → ASSISTANT
+
+角色隔离模式：
+  当前角色的消息 → ASSISTANT
+  其他角色的消息 → USER，添加 [From role: xxx] 前缀
+  用户消息 → 添加 [From user] 前缀
+```
+
+### 10.5 上下文窗口管理
+
+#### 10.5.1 Token 计数
+
+**TokenCacheManager** 利用公共前缀缓存优化重复计算：
+
+```
+calculateInputTokens(chatHistory, toolsJson)
+    │
+    ├──► 1. 将 toolsJson 拼接到 System Prompt 前面
+    ├──► 2. 找到与之前历史的公共前缀长度
+    ├──► 3. 缓存部分直接复用，新增部分重新计算
+    └──► 4. 使用 ChatUtils.estimateTokenCount() 估算
+```
+
+**MNN 本地模型**使用二分查找精确裁剪历史到 token 预算内。
+
+#### 10.5.2 历史截断策略
+
+截断通过**总结机制**实现，而非简单截断：
+
+```mermaid
+flowchart TD
+    Send[发送消息] --> Check{Token 超限?}
+    Check -->|否| Normal[正常发送]
+    Check -->|是| Summary[异步生成对话总结]
+    Summary --> Insert[插入总结到历史]
+    Insert --> Trim[截断旧消息]
+    Trim --> RaiseThreshold[提高阈值 0.5<br/>避免立即再次触发]
+    RaiseThreshold --> Send2[发送消息]
+```
+
+### 10.6 系统提示词动态构建
+
+#### 10.6.1 SystemPromptConfig 模板结构
+
+```
+系统提示词模板：
+    BEGIN_SELF_INTRODUCTION_SECTION     ← 自我介绍（可自定义）
+    WORKSPACE_GUIDELINES_SECTION        ← 工作区指引
+    TOOL_USAGE_GUIDELINES_SECTION       ← 工具使用说明
+    PACKAGE_SYSTEM_GUIDELINES_SECTION   ← 包系统指引
+    ACTIVE_PACKAGES_SECTION             ← 激活的工具包
+    AVAILABLE_TOOLS_SECTION             ← 可用工具列表
+```
+
+#### 10.6.2 动态构建流程
+
+```
+getSystemPromptWithCustomPrompts()
+    │
+    ├──► 1. dispatchSystemPromptComposeHooks(before_compose)
+    │
+    ├──► 2. getSystemPrompt() — 根据参数动态填充
+    │       ├── 根据语言选择中/英文模板
+    │       ├── 根据自定义模板覆盖
+    │       ├── 读取工作区规则文件
+    │       ├── 根据工具模式（CLI/ToolCall API/默认）调整格式
+    │       └── 根据视觉/音频/视频能力调整
+    │
+    ├──► 3. applyCustomPrompts() — 替换自我介绍 Section
+    │
+    ├──► 4. buildGroupOrchestrationHint() — 群组编排提示
+    │
+    └──► 5. dispatchSystemPromptComposeHooks(compose/after_compose)
+```
+
+### 10.7 角色卡系统
+
+#### 10.7.1 CharacterCard 数据模型
+
+```kotlin
+@Entity(tableName = "character_cards")
+data class CharacterCard(
+    @PrimaryKey val id: String,
+    val name: String,
+    val characterSetting: String = "",     // 角色设定（引导词）
+    val openingStatement: String = "",     // 开场白
+    val advancedCustomPrompt: String = "", // 高级自定义引导词
+    val chatModelBindingMode: String = FOLLOW_GLOBAL,  // 对话模型绑定模式
+    val chatModelConfigId: String? = null, // 固定绑定配置 ID
+    val memoryProfileBindingMode: String = FOLLOW_GLOBAL, // 记忆配置绑定
+    val toolAccessConfig: CharacterCardToolAccessConfig = ...,  // 工具白名单
+    val isDefault: Boolean = false,
+)
+```
+
+#### 10.7.2 角色卡与对话的集成
+
+```mermaid
+flowchart TD
+    Start[发送消息] --> ResolveCard[解析角色卡 ID]
+    ResolveCard --> CheckModel{模型绑定模式?}
+    CheckModel -->|FOLLOW_GLOBAL| GlobalConfig[使用全局模型配置]
+    CheckModel -->|FIXED_CONFIG| CardConfig[使用角色卡绑定的模型配置]
+
+    CheckModel --> CheckMemory{记忆配置绑定?}
+    CheckMemory -->|FOLLOW_GLOBAL| GlobalMemory[使用全局记忆配置]
+    CheckMemory -->|FIXED_PROFILE| CardMemory[使用角色卡绑定的记忆 Profile]
+
+    CheckMemory --> CheckTool{工具访问配置?}
+    CheckTool -->|ALLOW_ALL| AllTools[允许所有工具]
+    CheckTool -->|WHITELIST| FilterTools[按白名单过滤工具]
+
+    GlobalConfig --> BuildPrompt[构建系统提示词]
+    CardConfig --> BuildPrompt
+    GlobalMemory --> BuildPrompt
+    CardMemory --> BuildPrompt
+    AllTools --> BuildPrompt
+    FilterTools --> BuildPrompt
+    BuildPrompt --> Send[发送到 AI]
+```
+
+#### 10.7.3 群组编排
+
+```
+群组编排流程：
+    │
+    ├──► 1. planResponseOrder() — 规划回答顺序
+    │       使用 ROLE_RESPONSE_PLANNER 功能模型
+    │
+    ├──► 2. 按规划顺序依次调用
+    │       for each member in order:
+    │           sendMessageInternal(member)
+    │           awaitTurnComplete()
+    │
+    └──► 3. 所有成员完成 → 返回最终结果
+```
+
+### 10.8 对话轮次管理
+
+#### 10.8.1 执行上下文隔离
+
+每个 `sendMessage` 调用创建独立的 `MessageExecutionContext`：
+
+```kotlin
+private data class MessageExecutionContext(
+    val executionId: Int,
+    val streamBuffer: StringBuilder = StringBuilder(),
+    val roundManager: ConversationRoundManager = ConversationRoundManager(),
+    val isConversationActive: AtomicBoolean = AtomicBoolean(true),
+    val conversationHistory: MutableList<PromptTurn>,
+    val eventChannel: MutableSharedStream<TextStreamEvent>,
+)
+```
+
+#### 10.8.2 ConversationRoundManager
+
+```kotlin
+class ConversationRoundManager {
+    private val roundContents = mutableMapOf<Int, String>()  // 轮次号 → 内容
+    private val currentResponseRound = AtomicInteger(0)       // 当前轮次
+
+    fun initializeNewConversation()  // 重置所有轮次
+    fun updateContent(content)       // 更新当前轮次内容
+    fun startNewRound()              // 递增轮次号，开始新轮
+    fun getDisplayContent()          // 获取不含轮次分隔符的展示内容
+    fun getRawContent()              // 获取含 --- Round N --- 分隔符的原始内容
+}
+```
+
+#### 10.8.3 轮次切换
+
+```
+AI 响应流收集完成
+    ↓
+提取工具调用 (extractToolInvocations)
+    ↓
+执行工具
+    ↓
+roundManager.startNewRound() — 开始新轮次
+    ↓
+将工具结果加入 conversationHistory
+    ↓
+再次调用 serviceForFunction.sendMessage() — 发送新请求
+    ↓
+收集新响应 — 循环直到无工具调用
+```
+
+### 10.9 流式处理
+
+#### 10.9.1 流式响应处理
+
+```mermaid
+sequenceDiagram
+    participant UI as ChatViewModel
+    participant MPD as MessageProcessingDelegate
+    participant EAS as EnhancedAIService
+    participant AI as AI Provider
+
+    UI->>MPD: sendUserMessage()
+    MPD->>EAS: sendMessage(options)
+    EAS->>AI: sendMessage(history, params)
+    AI-->>EAS: Stream<String> (chunk by chunk)
+
+    loop 流式收集
+        EAS->>EAS: roundManager.updateContent(chunk)
+        EAS->>EAS: eventChannel.emit(TextStreamEvent)
+        EAS-->>MPD: 流式回调
+        MPD-->>UI: 更新 UI
+    end
+
+    EAS->>EAS: processStreamCompletion()
+    alt 包含工具调用
+        EAS->>EAS: extractToolInvocations()
+        EAS->>EAS: executeInvocations()
+        EAS->>EAS: roundManager.startNewRound()
+        EAS->>AI: sendMessage(更新后的历史)
+    else 无工具调用
+        EAS-->>MPD: 最终回复
+        MPD-->>UI: 显示完成
+    end
+```
+
+#### 10.9.2 Tool Call API 转换
+
+不同 AI Provider 的工具调用格式统一转换为 XML 标签：
+
+| Provider | 原始格式 | 转换目标 |
+|----------|----------|----------|
+| OpenAI | `tool_calls` JSON | `<tool name="..."><param>...</param></tool>` |
+| Claude | `content_block_start/delta/stop` | `<tool name="..."><param>...</param></tool>` |
+| 本地模型 | 文本中的 XML 标签 | 直接使用 |
+
+#### 10.9.3 修订追踪
+
+`TextStreamRevisionTracker` 支持流式输出中的修订（SAVEPOINT/ROLLBACK），用于工具调用时回滚已输出但不完整的内容。
+
+### 10.10 取消与中断机制
+
+取消操作采用**分层传播**策略：
+
+```mermaid
+flowchart TD
+    User[用户点击取消] --> CSC[ChatServiceCore.cancelCurrentMessage]
+
+    CSC --> MCD[MessageCoordinationDelegate.cancelSummary]
+    CSC --> MPD[MessageProcessingDelegate.cancelMessage]
+
+    MCD --> CancelSync[取消同步总结 Job]
+    MCD --> CancelAsync[取消异步总结 Job]
+    MCD --> CancelAuto[取消待派发自动续聊]
+
+    MPD --> CancelInternal[cancelMessageInternal]
+    CancelInternal --> CollectJobs[收集 sendJob/stateCollectionJob/streamCollectionJob]
+    CollectJobs --> AMM[AIMessageManager.cancelOperation]
+
+    AMM --> CancelPlugin[取消消息处理插件]
+    AMM --> CancelEAS[EnhancedAIService.cancelConversation]
+    AMM --> CancelJS[取消 ToolPkg JS 执行]
+
+    CancelEAS --> InvalidateCtx[invalidateAllExecutionContexts]
+    CancelEAS --> CancelStream[multiServiceManager.cancelAllStreaming]
+    CancelEAS --> CancelTools[cancelAllToolExecutions]
+```
+
+### 10.11 完整对话流程图
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant VM as ChatViewModel
+    participant CSC as ChatServiceCore
+    participant MCD as MessageCoordinationDelegate
+    participant MPD as MessageProcessingDelegate
+    participant AMM as AIMessageManager
+    participant CS as ConversationService
+    participant SPC as SystemPromptConfig
+    participant EAS as EnhancedAIService
+    participant AI as AI Provider
+
+    User->>VM: 发送消息
+    VM->>CSC: sendUserMessage()
+    CSC->>MCD: sendUserMessage()
+
+    MCD->>MCD: shouldGenerateSummary?
+    alt 需要总结
+        MCD->>MCD: launchAsyncSummaryForSend()
+    end
+
+    MCD->>MPD: sendUserMessage()
+    MPD->>AMM: prepareResponseStream()
+
+    AMM->>CS: prepareConversationHistory()
+    CS->>CS: processChatMessageWithTools() — XML 标签拆分
+    CS-->>AMM: List<PromptTurn>
+
+    AMM->>SPC: getSystemPromptWithCustomPrompts()
+    SPC-->>AMM: 完整系统提示词
+
+    AMM->>EAS: sendMessage(options)
+
+    loop ReAct 循环
+        EAS->>AI: sendMessage(history, tools)
+        AI-->>EAS: Stream<String>
+
+        alt 包含工具调用
+            EAS->>EAS: extractToolInvocations()
+            EAS->>EAS: executeInvocations()
+            EAS->>EAS: startNewRound()
+        else 无工具调用
+            EAS-->>MPD: 最终回复
+        end
+    end
+
+    MPD-->>MCD: onTurnComplete
+    MCD->>MCD: 记忆自动保存入队
+    MCD-->>CSC: 完成
+    CSC-->>VM: 更新 UI
+    VM-->>User: 显示回复
+```
+
+---
+
+## 十一、完整架构图（Mermaid）
 
 ```mermaid
 flowchart TB
