@@ -11,22 +11,22 @@
 7. [使用方法](#7-使用方法)
 8. [文件索引](#8-文件索引)
 
----
+***
 
 ## 1. 模块概述
 
-**k2fsa** 模块是 Operit 项目中用于**本地语音识别（ASR）**的核心引擎封装层。它基于 [k2-fsa](https://github.com/k2-fsa) 开源社区的 **sherpa-ncnn** 和 **sherpa-mnn** 项目，提供在 Android 设备上离线运行的流式语音识别能力。
+**k2fsa** 模块是 Operit 项目中用于\*\*本地语音识别（ASR）\*\*的核心引擎封装层。它基于 [k2-fsa](https://github.com/k2-fsa) 开源社区的 **sherpa-ncnn** 和 **sherpa-mnn** 项目，提供在 Android 设备上离线运行的流式语音识别能力。
 
 ### 1.1 核心能力
 
-| 能力 | 说明 |
-|------|------|
-| 流式语音识别 | 实时从麦克风输入识别语音，边录边识别 |
-| 多模型支持 | 支持 Zipformer、Paraformer、LSTM、NeMo CTC 等多种模型架构 |
-| 多语言支持 | 中英双语、中文、英文、法语、韩语等 |
-| VAD 集成 | 集成 Silero VAD 进行语音活动检测，减少无效识别 |
-| 端点检测 | 自动检测语音结束，支持连续识别模式 |
-| 热词支持 | 支持热词文件加载，提升特定词汇识别率 |
+| 能力     | 说明                                            |
+| ------ | --------------------------------------------- |
+| 流式语音识别 | 实时从麦克风输入识别语音，边录边识别                            |
+| 多模型支持  | 支持 Zipformer、Paraformer、LSTM、NeMo CTC 等多种模型架构 |
+| 多语言支持  | 中英双语、中文、英文、法语、韩语等                             |
+| VAD 集成 | 集成 Silero VAD 进行语音活动检测，减少无效识别                 |
+| 端点检测   | 自动检测语音结束，支持连续识别模式                             |
+| 热词支持   | 支持热词文件加载，提升特定词汇识别率                            |
 
 ### 1.2 模块定位
 
@@ -66,7 +66,7 @@
 └─────────────────────────────────────────────┘
 ```
 
----
+***
 
 ## 2. 整体架构
 
@@ -174,7 +174,7 @@
 └─────────────────────────────────────────────┘
 ```
 
----
+***
 
 ## 3. sherpa-ncnn 子模块
 
@@ -182,8 +182,8 @@
 
 `sherpa-ncnn` 位于 `com.k2fsa.sherpa.ncnn` 包下：
 
-| 文件 | 路径 |
-|------|------|
+| 文件            | 路径                                                      |
+| ------------- | ------------------------------------------------------- |
 | SherpaNcnn.kt | `app/src/main/java/com/k2fsa/sherpa/ncnn/SherpaNcnn.kt` |
 
 ### 3.2 配置数据类
@@ -264,6 +264,7 @@ class SherpaNcnn(
 ```
 
 **设计要点**：
+
 - 单实例管理：一个 `SherpaNcnn` 对象对应一个底层 C++ 识别器
 - 无 Stream 概念：音频直接送入识别器，内部自动管理缓冲区
 - `reset(false)` 重置状态但不重新创建底层对象，适合连续识别
@@ -275,17 +276,17 @@ class SherpaNcnn(
 fun getModelConfig(type: Int, useGPU: Boolean): ModelConfig?
 ```
 
-| type | 模型 | 语言 | 说明 |
-|------|------|------|------|
-| 0 | sherpa-ncnn-2022-09-30 | 中文 | 早期模型 |
-| 1 | sherpa-ncnn-conv-emformer-transducer | 中英双语 | ConvEmformer 架构 |
-| 2 | sherpa-ncnn-streaming-zipformer-bilingual-zh-en | 中英双语 | **项目默认使用** |
-| 3 | sherpa-ncnn-streaming-zipformer-en | 英文 | Zipformer 英文 |
-| 4 | sherpa-ncnn-streaming-zipformer-fr | 法文 | Zipformer 法文 |
-| 5 | sherpa-ncnn-streaming-zipformer-zh-14M | 中文 | 小模型（14M） |
-| 6 | sherpa-ncnn-streaming-zipformer-small-bilingual | 中英双语 | 小型双语模型 |
+| type | 模型                                              | 语言   | 说明              |
+| ---- | ----------------------------------------------- | ---- | --------------- |
+| 0    | sherpa-ncnn-2022-09-30                          | 中文   | 早期模型            |
+| 1    | sherpa-ncnn-conv-emformer-transducer            | 中英双语 | ConvEmformer 架构 |
+| 2    | sherpa-ncnn-streaming-zipformer-bilingual-zh-en | 中英双语 | **项目默认使用**      |
+| 3    | sherpa-ncnn-streaming-zipformer-en              | 英文   | Zipformer 英文    |
+| 4    | sherpa-ncnn-streaming-zipformer-fr              | 法文   | Zipformer 法文    |
+| 5    | sherpa-ncnn-streaming-zipformer-zh-14M          | 中文   | 小模型（14M）        |
+| 6    | sherpa-ncnn-streaming-zipformer-small-bilingual | 中英双语 | 小型双语模型          |
 
----
+***
 
 ## 4. sherpa-mnn 子模块
 
@@ -293,12 +294,12 @@ fun getModelConfig(type: Int, useGPU: Boolean): ModelConfig?
 
 `sherpa-mnn` 位于 `com.k2fsa.sherpa.mnn` 包下：
 
-| 文件 | 路径 |
-|------|------|
+| 文件                  | 路径                                                           |
+| ------------------- | ------------------------------------------------------------ |
 | OnlineRecognizer.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineRecognizer.kt` |
-| OnlineStream.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineStream.kt` |
-| FeatureConfig.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/FeatureConfig.kt` |
-| Vad.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/Vad.kt` |
+| OnlineStream.kt     | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineStream.kt`     |
+| FeatureConfig.kt    | `app/src/main/java/com/k2fsa/sherpa/mnn/FeatureConfig.kt`    |
+| Vad.kt              | `app/src/main/java/com/k2fsa/sherpa/mnn/Vad.kt`              |
 
 ### 4.2 配置数据类
 
@@ -391,6 +392,7 @@ class OnlineRecognizer(
 ```
 
 **设计要点**：
+
 - 支持多 Stream：一个 `OnlineRecognizer` 可创建多个 `OnlineStream`
 - Stream 隔离：每个 Stream 有独立的识别状态，适合多路识别场景
 - 结果包含 `tokens` 和 `timestamps`，支持细粒度分析
@@ -457,7 +459,7 @@ class SpeechSegment(val start: Int, val samples: FloatArray)
 
 **注意**：当前项目中 sherpa-mnn 内置 VAD 因兼容性问题已禁用，改用 `OnnxSileroVad`。
 
----
+***
 
 ## 5. 项目中的使用方式
 
@@ -573,15 +575,15 @@ while (isActive && state == RECOGNIZING) {
 
 **与 ncnn 实现的主要区别**：
 
-| 维度 | SherpaSpeechProvider (ncnn) | SherpaMnnSpeechProvider (mnn) |
-|------|----------------------------|------------------------------|
-| 识别器 | `SherpaNcnn` | `OnlineRecognizer` |
-| 音频送入 | `recognizer.acceptSamples(samples)` | `stream.acceptWaveform(samples, sampleRate)` |
-| 解码 | `recognizer.decode()` | `recognizer.decode(stream)` |
-| 结果获取 | `recognizer.text` | `recognizer.getResult(stream)` |
-| Stream 管理 | 无（内部管理） | 显式创建/释放 `OnlineStream` |
-| 预滚动 | `recognizer.acceptSamples(preroll)` | `stream.acceptWaveform(preroll)` |
-| VAD | 内置 `OnnxSileroVad` | 内置 `OnnxSileroVad`（sherpa-mnn VAD 已禁用） |
+| 维度        | SherpaSpeechProvider (ncnn)         | SherpaMnnSpeechProvider (mnn)                |
+| --------- | ----------------------------------- | -------------------------------------------- |
+| 识别器       | `SherpaNcnn`                        | `OnlineRecognizer`                           |
+| 音频送入      | `recognizer.acceptSamples(samples)` | `stream.acceptWaveform(samples, sampleRate)` |
+| 解码        | `recognizer.decode()`               | `recognizer.decode(stream)`                  |
+| 结果获取      | `recognizer.text`                   | `recognizer.getResult(stream)`               |
+| Stream 管理 | 无（内部管理）                             | 显式创建/释放 `OnlineStream`                       |
+| 预滚动       | `recognizer.acceptSamples(preroll)` | `stream.acceptWaveform(preroll)`             |
+| VAD       | 内置 `OnnxSileroVad`                  | 内置 `OnnxSileroVad`（sherpa-mnn VAD 已禁用）       |
 
 **Stream 生命周期**：
 
@@ -604,7 +606,7 @@ stream?.release()
 stream = null
 ```
 
----
+***
 
 ## 6. VAD 语音活动检测
 
@@ -692,11 +694,12 @@ ONNX 推理 → 语音概率 (0.0 - 1.0)
 ```
 
 **优势**：
+
 - 减少无效计算：静音期间不送入识别器
 - 自动分段：根据语音/静音边界自动切分 utterance
 - 节省电量：降低 CPU 占用
 
----
+***
 
 ## 7. 使用方法
 
@@ -825,28 +828,29 @@ vad.reset()
 vad.close()
 ```
 
----
+***
 
 ## 8. 文件索引
 
 ### k2fsa API 层
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| SherpaNcnn.kt | `app/src/main/java/com/k2fsa/sherpa/ncnn/SherpaNcnn.kt` | ncnn 识别器、配置数据类、预置模型 |
-| OnlineRecognizer.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineRecognizer.kt` | mnn 识别器、配置数据类、预置模型 |
-| OnlineStream.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineStream.kt` | mnn 识别流 |
-| FeatureConfig.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/FeatureConfig.kt` | mnn 特征配置 |
-| Vad.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/Vad.kt` | mnn 内置 VAD |
+| 文件                  | 路径                                                           | 说明                  |
+| ------------------- | ------------------------------------------------------------ | ------------------- |
+| SherpaNcnn.kt       | `app/src/main/java/com/k2fsa/sherpa/ncnn/SherpaNcnn.kt`      | ncnn 识别器、配置数据类、预置模型 |
+| OnlineRecognizer.kt | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineRecognizer.kt` | mnn 识别器、配置数据类、预置模型  |
+| OnlineStream.kt     | `app/src/main/java/com/k2fsa/sherpa/mnn/OnlineStream.kt`     | mnn 识别流             |
+| FeatureConfig.kt    | `app/src/main/java/com/k2fsa/sherpa/mnn/FeatureConfig.kt`    | mnn 特征配置            |
+| Vad.kt              | `app/src/main/java/com/k2fsa/sherpa/mnn/Vad.kt`              | mnn 内置 VAD          |
 
 ### 业务封装层
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| SpeechService.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/SpeechService.kt` | 语音识别服务接口 |
-| SherpaSpeechProvider.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/SherpaSpeechProvider.kt` | ncnn 实现 |
-| SherpaMnnSpeechProvider.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/SherpaMnnSpeechProvider.kt` | mnn 实现 |
-| OnnxSileroVad.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/OnnxSileroVad.kt` | ONNX VAD 实现 |
-| SpeechPrerollStore.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/SpeechPrerollStore.kt` | 预滚动音频缓存 |
-| PersonalWakeListener.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/PersonalWakeListener.kt` | 语音唤醒 |
-| PersonalWakeEnrollment.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/PersonalWakeEnrollment.kt` | 唤醒词注册 |
+| 文件                         | 路径                                                                                 | 说明          |
+| -------------------------- | ---------------------------------------------------------------------------------- | ----------- |
+| SpeechService.kt           | `app/src/main/java/com/ai/assistance/operit/api/speech/SpeechService.kt`           | 语音识别服务接口    |
+| SherpaSpeechProvider.kt    | `app/src/main/java/com/ai/assistance/operit/api/speech/SherpaSpeechProvider.kt`    | ncnn 实现     |
+| SherpaMnnSpeechProvider.kt | `app/src/main/java/com/ai/assistance/operit/api/speech/SherpaMnnSpeechProvider.kt` | mnn 实现      |
+| OnnxSileroVad.kt           | `app/src/main/java/com/ai/assistance/operit/api/speech/OnnxSileroVad.kt`           | ONNX VAD 实现 |
+| SpeechPrerollStore.kt      | `app/src/main/java/com/ai/assistance/operit/api/speech/SpeechPrerollStore.kt`      | 预滚动音频缓存     |
+| PersonalWakeListener.kt    | `app/src/main/java/com/ai/assistance/operit/api/speech/PersonalWakeListener.kt`    | 语音唤醒        |
+| PersonalWakeEnrollment.kt  | `app/src/main/java/com/ai/assistance/operit/api/speech/PersonalWakeEnrollment.kt`  | 唤醒词注册       |
+

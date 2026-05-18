@@ -12,7 +12,7 @@
 8. [使用方法](#8-使用方法)
 9. [文件索引](#9-文件索引)
 
----
+***
 
 ## 1. 模块概述
 
@@ -20,14 +20,14 @@
 
 ### 1.1 核心能力
 
-| 能力 | 说明 |
-|------|------|
-| FBX 模型加载 | 支持 .fbx 格式（二进制/ASCII）的 3D 模型解析 |
-| 动画栈解析 | 提取 FBX 文件中的多个动画栈（AnimStack），获取名称和时长 |
-| 骨骼动画评估 | 基于时间轴评估骨骼动画，支持蒙皮（Skinning）变形 |
-| 材质与纹理 | 支持 PBR 和 FBX 传统材质，支持内嵌/外部纹理 |
-| OpenGL ES 2.0 渲染 | 实时预览渲染，支持顶点法线、纹理映射、透明度混合 |
-| 相机控制 | 支持轨道相机（Orbit Camera），可调整俯仰、偏航、距离、目标高度 |
+| 能力               | 说明                                    |
+| ---------------- | ------------------------------------- |
+| FBX 模型加载         | 支持 .fbx 格式（二进制/ASCII）的 3D 模型解析        |
+| 动画栈解析            | 提取 FBX 文件中的多个动画栈（AnimStack），获取名称和时长   |
+| 骨骼动画评估           | 基于时间轴评估骨骼动画，支持蒙皮（Skinning）变形          |
+| 材质与纹理            | 支持 PBR 和 FBX 传统材质，支持内嵌/外部纹理           |
+| OpenGL ES 2.0 渲染 | 实时预览渲染，支持顶点法线、纹理映射、透明度混合              |
+| 相机控制             | 支持轨道相机（Orbit Camera），可调整俯仰、偏航、距离、目标高度 |
 
 ### 1.2 模块定位
 
@@ -71,7 +71,7 @@
 └─────────────────────────────────────────────┘
 ```
 
----
+***
 
 ## 2. 整体架构
 
@@ -151,7 +151,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
----
+***
 
 ## 3. ufbx 引擎核心架构
 
@@ -262,7 +262,7 @@ UpdatePreviewFrame(session, animation_name, time_seconds)
 [7] texCoord.v
 ```
 
----
+***
 
 ## 4. JNI 桥接层
 
@@ -278,9 +278,9 @@ internal object FbxLibraryLoader {
 }
 ```
 
-### 4.2 fbx_jni.cpp — 核心 JNI 实现
+### 4.2 fbx\_jni.cpp — 核心 JNI 实现
 
-[fbx_jni.cpp](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/src/main/cpp/fbx_jni.cpp)
+[fbx\_jni.cpp](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/src/main/cpp/fbx_jni.cpp)
 
 #### 4.2.1 错误处理
 
@@ -542,7 +542,7 @@ int EnsureTextureSlot(PreviewSession *session, const ufbx_texture *texture) {
 }
 ```
 
----
+***
 
 ## 5. Kotlin API 层
 
@@ -758,7 +758,7 @@ val sampleTimeSeconds = when {
 }
 ```
 
----
+***
 
 ## 6. 项目中的使用方式
 
@@ -853,7 +853,7 @@ fun FbxRenderer(
 }
 ```
 
----
+***
 
 ## 7. 构建配置
 
@@ -924,14 +924,14 @@ android {
 
 ### 7.3 关键构建选项
 
-| 选项 | 值 | 说明 |
-|------|-----|------|
-| C_STANDARD | 99 | ufbx 使用 C99 |
-| CXX_STANDARD | 17 | JNI 桥接使用 C++17 |
+| 选项                  | 值    | 说明                  |
+| ------------------- | ---- | ------------------- |
+| C\_STANDARD         | 99   | ufbx 使用 C99         |
+| CXX\_STANDARD       | 17   | JNI 桥接使用 C++17      |
 | max-page-size=16384 | 链接选项 | Android 15+ 16KB 对齐 |
-| ufbx.c | 单文件库 | 零依赖 FBX 解析 |
+| ufbx.c              | 单文件库 | 零依赖 FBX 解析          |
 
----
+***
 
 ## 8. 使用方法
 
@@ -1034,41 +1034,42 @@ FbxRenderer(
 )
 ```
 
----
+***
 
 ## 9. 文件索引
 
 ### Kotlin API 层
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| FbxLibraryLoader.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxLibraryLoader.kt` | 库加载器 |
-| FbxNative.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxNative.kt` | JNI 接口对象 |
-| FbxInspector.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxInspector.kt` | 模型检测 |
-| FbxGlSurfaceView.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxGlSurfaceView.kt` | OpenGL 渲染视图 + 渲染器 |
+| 文件                   | 路径                                                            | 说明                |
+| -------------------- | ------------------------------------------------------------- | ----------------- |
+| FbxLibraryLoader.kt  | `fbx/src/main/java/com/ai/assistance/fbx/FbxLibraryLoader.kt` | 库加载器              |
+| FbxNative.kt         | `fbx/src/main/java/com/ai/assistance/fbx/FbxNative.kt`        | JNI 接口对象          |
+| FbxInspector.kt      | `fbx/src/main/java/com/ai/assistance/fbx/FbxInspector.kt`     | 模型检测              |
+| FbxGlSurfaceView\.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxGlSurfaceView.kt` | OpenGL 渲染视图 + 渲染器 |
 
 ### C++ JNI 桥接层
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| fbx_jni.cpp | `fbx/src/main/cpp/fbx_jni.cpp` | 核心 JNI 实现 |
+| 文件           | 路径                             | 说明        |
+| ------------ | ------------------------------ | --------- |
+| fbx\_jni.cpp | `fbx/src/main/cpp/fbx_jni.cpp` | 核心 JNI 实现 |
 
 ### ufbx 引擎核心
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
+| 文件     | 路径                            | 说明          |
+| ------ | ----------------------------- | ----------- |
 | ufbx.c | `fbx/third_party/ufbx/ufbx.c` | ufbx 单文件库实现 |
-| ufbx.h | `fbx/third_party/ufbx/ufbx.h` | ufbx 头文件 |
+| ufbx.h | `fbx/third_party/ufbx/ufbx.h` | ufbx 头文件    |
 
 ### 业务封装层
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
+| 文件             | 路径                                                          | 说明         |
+| -------------- | ----------------------------------------------------------- | ---------- |
 | FbxRenderer.kt | `app/src/main/java/.../avatar/impl/fbx/view/FbxRenderer.kt` | Compose 视图 |
 
 ### 构建配置
 
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| CMakeLists.txt | `fbx/CMakeLists.txt` | CMake 构建配置 |
+| 文件               | 路径                     | 说明          |
+| ---------------- | ---------------------- | ----------- |
+| CMakeLists.txt   | `fbx/CMakeLists.txt`   | CMake 构建配置  |
 | build.gradle.kts | `fbx/build.gradle.kts` | Gradle 构建配置 |
+
