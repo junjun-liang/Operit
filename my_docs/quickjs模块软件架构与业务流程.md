@@ -6,30 +6,30 @@
 
 ### 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| **QuickJS 引擎** | 基于 Fabrice Bellard 的 QuickJS，ES2020 支持 |
-| **JNI 桥接** | C++ 层实现 JNI 接口，连接 Java/Kotlin 与 QuickJS |
-| **Host Bridge** | JS 调用 Java 的双向通信机制 |
-| **Timer 支持** | setTimeout/setInterval 定时器实现 |
-| **Console 支持** | console.log/info/warn/error/debug 完整实现 |
-| **Storage 支持** | localStorage/sessionStorage 内存存储 |
-| **中断机制** | 支持强制中断长时间运行的 JS 脚本 |
-| **异常处理** | 详细的异常信息收集（堆栈、调用链、上下文） |
-| **引擎池** | 最多 4 个并发引擎，Channel 池化管理 |
+| 特性              | 说明                                      |
+| --------------- | --------------------------------------- |
+| **QuickJS 引擎**  | 基于 Fabrice Bellard 的 QuickJS，ES2020 支持  |
+| **JNI 桥接**      | C++ 层实现 JNI 接口，连接 Java/Kotlin 与 QuickJS |
+| **Host Bridge** | JS 调用 Java 的双向通信机制                      |
+| **Timer 支持**    | setTimeout/setInterval 定时器实现            |
+| **Console 支持**  | console.log/info/warn/error/debug 完整实现  |
+| **Storage 支持**  | localStorage/sessionStorage 内存存储        |
+| **中断机制**        | 支持强制中断长时间运行的 JS 脚本                      |
+| **异常处理**        | 详细的异常信息收集（堆栈、调用链、上下文）                   |
+| **引擎池**         | 最多 4 个并发引擎，Channel 池化管理                 |
 
 ### 技术栈
 
-| 技术 | 版本/标准 | 用途 |
-|------|----------|------|
-| QuickJS | upstream C 源码 | JS 引擎核心 |
-| C++ | C++17 | JNI 桥接层 |
-| C | C11 | QuickJS 源码编译 |
-| CMake | 3.22.1+ | 原生库构建 |
-| Kotlin | JVM 17 | Runtime 封装层 |
-| NDK | arm64-v8a | Android 原生开发 |
+| 技术      | 版本/标准         | 用途           |
+| ------- | ------------- | ------------ |
+| QuickJS | upstream C 源码 | JS 引擎核心      |
+| C++     | C++17         | JNI 桥接层      |
+| C       | C11           | QuickJS 源码编译 |
+| CMake   | 3.22.1+       | 原生库构建        |
+| Kotlin  | JVM 17        | Runtime 封装层  |
+| NDK     | arm64-v8a     | Android 原生开发 |
 
----
+***
 
 ## 二、整体架构设计思想
 
@@ -90,14 +90,14 @@
 
 ### 2.2 架构模式
 
-| 模式 | 应用位置 | 说明 |
-|------|----------|------|
-| **JNI 桥接模式** | C++ ↔ Kotlin | 通过 JNI 实现跨语言调用 |
-| **对象池模式** | JsToolManager | Channel 管理 4 个引擎实例 |
-| **代理模式** | NativeInterface Proxy | JS 端代理所有未定义属性为 Host Call |
-| **回调模式** | HostBridge | JS 通过 NativeInterface.__call 回调 Java |
-| **RAII** | QuickJsVm | 构造函数创建资源，析构函数释放资源 |
-| **单例模式** | JsToolManager | 全局单例管理 JS 工具执行 |
+| 模式           | 应用位置                  | 说明                                     |
+| ------------ | --------------------- | -------------------------------------- |
+| **JNI 桥接模式** | C++ ↔ Kotlin          | 通过 JNI 实现跨语言调用                         |
+| **对象池模式**    | JsToolManager         | Channel 管理 4 个引擎实例                     |
+| **代理模式**     | NativeInterface Proxy | JS 端代理所有未定义属性为 Host Call               |
+| **回调模式**     | HostBridge            | JS 通过 NativeInterface.\_\_call 回调 Java |
+| **RAII**     | QuickJsVm             | 构造函数创建资源，析构函数释放资源                      |
+| **单例模式**     | JsToolManager         | 全局单例管理 JS 工具执行                         |
 
 ### 2.3 核心设计原则
 
@@ -107,7 +107,7 @@
 4. **可中断执行**：通过原子标志 + QuickJS 中断处理器实现脚本强制终止
 5. **兼容层设计**：通过 JS 兼容脚本补齐浏览器环境（console、timer、storage 等）
 
----
+***
 
 ## 三、源码目录结构
 
@@ -140,7 +140,7 @@ quickjs/
 
 **注意**：`thirdparty/quickjs/` 目录在构建时通过 CMake 的相对路径引用（`../../../thirdparty/quickjs`），不在 `quickjs` 模块目录内。
 
----
+***
 
 ## 四、核心架构详解
 
@@ -208,14 +208,14 @@ private:
 
 **关键 JNI 方法映射：**
 
-| JNI 方法 | C++ 函数 | 说明 |
-|----------|----------|------|
-| `nativeCreate(hostBridge)` | `Java_..._QuickJsNativeBridge_nativeCreate` | 创建 QuickJsVm 实例，返回句柄 |
-| `nativeDestroy(handle)` | `Java_..._QuickJsNativeBridge_nativeDestroy` | 销毁 QuickJsVm 实例 |
-| `nativeEvaluate(handle, script, fileName)` | `Java_..._nativeEvaluate` | 执行 JS 脚本 |
-| `nativeCallFunction(handle, funcName, argsJson, callSite)` | `Java_..._nativeCallFunction` | 调用 JS 函数 |
-| `nativeExecutePendingJobs(handle, maxJobs)` | `Java_..._nativeExecutePendingJobs` | 执行待处理任务 |
-| `nativeInterrupt(handle)` | `Java_..._nativeInterrupt` | 设置中断标志 |
+| JNI 方法                                                     | C++ 函数                                       | 说明                   |
+| ---------------------------------------------------------- | -------------------------------------------- | -------------------- |
+| `nativeCreate(hostBridge)`                                 | `Java_..._QuickJsNativeBridge_nativeCreate`  | 创建 QuickJsVm 实例，返回句柄 |
+| `nativeDestroy(handle)`                                    | `Java_..._QuickJsNativeBridge_nativeDestroy` | 销毁 QuickJsVm 实例      |
+| `nativeEvaluate(handle, script, fileName)`                 | `Java_..._nativeEvaluate`                    | 执行 JS 脚本             |
+| `nativeCallFunction(handle, funcName, argsJson, callSite)` | `Java_..._nativeCallFunction`                | 调用 JS 函数             |
+| `nativeExecutePendingJobs(handle, maxJobs)`                | `Java_..._nativeExecutePendingJobs`          | 执行待处理任务              |
+| `nativeInterrupt(handle)`                                  | `Java_..._nativeInterrupt`                   | 设置中断标志               |
 
 ### 4.2 Kotlin 层 — QuickJsNativeRuntime
 
@@ -473,7 +473,7 @@ class QuickJsNativeHostDispatcher(
 }
 ```
 
----
+***
 
 ## 五、核心业务流程
 
@@ -668,7 +668,7 @@ JS 执行抛出异常
             • 返回包含 "interrupted" 信息的错误信封
 ```
 
----
+***
 
 ## 六、CMake 构建配置
 
@@ -741,7 +741,7 @@ target_link_libraries(
 target_link_options(quickjsjni PRIVATE "-Wl,-z,max-page-size=16384")
 ```
 
----
+***
 
 ## 七、Gradle 构建配置
 
@@ -794,7 +794,7 @@ dependencies {
 }
 ```
 
----
+***
 
 ## 八、完整架构图（Mermaid）
 
@@ -891,7 +891,7 @@ flowchart TB
     Timer --> Dispatcher
 ```
 
----
+***
 
 ## 九、快速上手路径
 
@@ -916,7 +916,7 @@ flowchart TB
 3. **如需 Native 支持，在 HostDispatcher 中添加对应处理**
 4. **重新编译测试**
 
----
+***
 
 *文档生成时间: 2026-05-13*
 *基于 Operit AI quickjs 模块代码分析*

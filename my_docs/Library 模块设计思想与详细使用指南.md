@@ -5,21 +5,22 @@
 `library` 模块是 Operit 应用的**长期记忆（Long-term Memory）管理核心**，负责将对话内容自动分析、提取并存储为结构化的**记忆图谱（Memory Graph）**。该模块实现了从原始对话到可检索、可关联的知识网络的完整闭环。
 
 模块包含两个核心类：
+
 - **`MemoryLibrary`**：记忆库管理主类，提供对话分析、记忆提取、图谱构建、自动分类等功能
 - **`MemoryAutoSaveScheduler`**：长期记忆自动保存调度器，按配置周期轮询并批量处理记忆候选
 
----
+***
 
 ## 二、核心设计思想
 
 ### 2.1 知识图谱驱动的记忆模型
 
-不同于简单的键值对或文本块存储，`library` 模块采用**知识图谱（Knowledge Graph）**模型来组织记忆：
+不同于简单的键值对或文本块存储，`library` 模块采用\*\*知识图谱（Knowledge Graph）\*\*模型来组织记忆：
 
 - **节点（Entity）**：每个记忆是一个节点，包含标题、内容、标签、可信度、重要性等属性
 - **关系（Link）**：记忆之间可以建立带权重的有向链接，描述它们之间的语义关联
 - **主问题（Main Problem）**：每次对话分析会提取一个核心问题作为图谱的根节点
-- **别名消解（Alias Resolution）**：LLM 自动识别新实体是否为已有实体的别名，避免重复创建
+- **别名消解（Alias Resolution）**：LLM 自动识别新实体是否为已有实体的别名，避免重复创建 
 
 ### 2.2 混合检索策略（Hybrid Search）
 
@@ -51,7 +52,7 @@
 - 满足最小候选数阈值后才触发保存，避免频繁调用 AI
 - 支持多 Profile 隔离，每个用户配置独立调度
 
----
+***
 
 ## 三、核心架构与数据流
 
@@ -135,7 +136,7 @@
 └─────────────────┘
 ```
 
----
+***
 
 ## 四、核心类详解
 
@@ -144,6 +145,7 @@
 **类型**：`object`（单例）
 
 **主要职责**：
+
 - 对话内容的结构化分析与记忆提取
 - 知识图谱的构建与维护
 - 记忆的自动分类
@@ -152,25 +154,30 @@
 **核心方法**：
 
 #### `initialize(context: Context)`
+
 初始化记忆库，加载 API 偏好配置。
 
 #### `saveMemoryAsync(...)` / `saveMemoryNow(...)`
+
 保存记忆的异步/同步入口。接受对话历史、内容、AI 服务等参数，执行完整的分析-提取-存储流程。
 
 **参数说明**：
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `context` | `Context` | Android 上下文 |
-| `toolHandler` | `AIToolHandler` | 工具处理器实例 |
+
+| 参数                    | 类型                           | 说明                   |
+| --------------------- | ---------------------------- | -------------------- |
+| `context`             | `Context`                    | Android 上下文          |
+| `toolHandler`         | `AIToolHandler`              | 工具处理器实例              |
 | `conversationHistory` | `List<Pair<String, String>>` | 对话历史（role → content） |
-| `content` | `String` | 需要分析的对话内容（通常是 AI 回复） |
-| `aiService` | `AIService` | 用于分析的 AI 服务实例 |
-| `profileIdOverride` | `String?` | 可选的 Profile ID 覆盖 |
+| `content`             | `String`                     | 需要分析的对话内容（通常是 AI 回复） |
+| `aiService`           | `AIService`                  | 用于分析的 AI 服务实例        |
+| `profileIdOverride`   | `String?`                    | 可选的 Profile ID 覆盖    |
 
 #### `autoCategorizeMemoriesAsync(context: Context, aiService: AIService)`
+
 自动为未分类记忆分配文件夹路径。后台异步执行，分批处理（每批 10 条）。
 
 **内部关键流程**：
+
 1. `saveMemory()` → 内容预处理 → `generateAnalysis()` → 解析并应用结果
 2. `autoCategorizeMemories()` → 分批检索 → `categorizeBatch()` → `parseAndApplyCategorization()`
 
@@ -179,6 +186,7 @@
 **类型**：`class`
 
 **主要职责**：
+
 - 按配置周期后台轮询记忆候选
 - 按聊天会话分组批量处理
 - 管理多 Profile 的独立调度状态
@@ -186,27 +194,33 @@
 **核心方法**：
 
 #### `start()`
+
 启动调度器循环。在 IO 线程上每分钟检查一次。
 
 #### `runOnce()`
+
 执行一轮扫描和处理。使用原子标志防止并发执行。
 
 #### `scanAndProcessCandidates()`
+
 扫描所有 Profile 的候选，满足条件则调用 `processChatCandidateGroup()`。
 
 **处理条件**：
+
 - 当前时间 >= 下次运行时间
 - 候选总数 >= `MIN_TOTAL_CANDIDATES_TO_EXTRACT`（5 条）
 
 #### `processChatCandidateGroup(...)`
+
 处理单个聊天会话的候选组：
+
 1. 标记为处理中
 2. 查询对应消息（最多 48 条，按时间倒序）
 3. 过滤有效对话历史（必须包含 user + assistant）
 4. 调用 `MemoryLibrary.saveMemoryNow()`
 5. 成功则删除候选，失败则标记失败状态
 
----
+***
 
 ## 五、AI 分析输出格式
 
@@ -246,6 +260,7 @@ LLM 返回的 JSON 结构如下：
 ```
 
 **字段说明**：
+
 - `main`：核心问题节点（整个对话的中心主题）
 - `new`：新发现的实体/知识点
 - `links`：实体之间的关系链接
@@ -253,7 +268,7 @@ LLM 返回的 JSON 结构如下：
 - `merge`：将多个记忆合并为一个
 - `user`：提取的用户偏好信息（`<UNCHANGED>` 表示不变）
 
----
+***
 
 ## 六、内容预处理策略
 
@@ -286,6 +301,7 @@ LLM 返回的 JSON 结构如下：
 ```
 
 或英文格式：
+
 ```
 Question: xxx
 Solution: xxx
@@ -293,7 +309,7 @@ Solution: xxx
 
 去除工具标签、URL、Markdown 标记后，取前 500 字符作为检索查询。
 
----
+***
 
 ## 七、使用示例
 
@@ -374,7 +390,7 @@ val minutesUntilNext = scheduler?.getMinutesUntilNextRun(profileId)
 // 返回距离下次执行的分钟数
 ```
 
----
+***
 
 ## 八、配置与调优
 
@@ -400,14 +416,14 @@ val searchConfig = MemorySearchSettingsPreferences(context, profileId).load()
 
 ### 8.3 关键常量
 
-| 常量 | 值 | 说明 |
-|------|-----|------|
-| `LOOP_TICK_MS` | 60,000ms | 调度器轮询间隔 |
-| `DEFAULT_POLL_INTERVAL_MS` | 1,800,000ms (30min) | 默认保存间隔 |
-| `MAX_MESSAGES_PER_CHAT` | 48 | 每次处理最大消息数 |
-| `MIN_TOTAL_CANDIDATES_TO_EXTRACT` | 5 | 触发保存的最小候选数 |
+| 常量                                | 值                   | 说明         |
+| --------------------------------- | ------------------- | ---------- |
+| `LOOP_TICK_MS`                    | 60,000ms            | 调度器轮询间隔    |
+| `DEFAULT_POLL_INTERVAL_MS`        | 1,800,000ms (30min) | 默认保存间隔     |
+| `MAX_MESSAGES_PER_CHAT`           | 48                  | 每次处理最大消息数  |
+| `MIN_TOTAL_CANDIDATES_TO_EXTRACT` | 5                   | 触发保存的最小候选数 |
 
----
+***
 
 ## 九、最佳实践
 
@@ -417,3 +433,4 @@ val searchConfig = MemorySearchSettingsPreferences(context, profileId).load()
 4. **错误处理**：保存失败时，候选会被标记为失败状态，可在设置中提供重试入口
 5. **多 Profile 隔离**：每个用户配置有独立的记忆库和调度状态，切换用户时无需额外处理
 6. **监控 Token 消耗**：每次 AI 调用后会自动更新 Token 统计，可通过 `ApiPreferences` 查看
+
