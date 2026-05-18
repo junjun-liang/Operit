@@ -16,7 +16,7 @@
 12. [使用示例](#12-使用示例)
 13. [最佳实践](#13-最佳实践)
 
----
+***
 
 ## 1. 模块概述
 
@@ -24,15 +24,15 @@ Enhance 模块是 Operit 项目的**对话增强层**，位于 LLMProvider 之�
 
 ### 1.1 核心能力
 
-| 功能 | 说明 |
-|------|------|
-| **对话历史准备** | 构建系统提示词、处理角色卡、注入用户偏好 |
-| **对话总结** | 自动总结长对话，支持增量总结 |
-| **工具执行链** | 解析 XML 工具调用、执行工具、处理结果 |
-| **多服务管理** | 不同功能使用不同模型（聊天/总结/识图/翻译） |
-| **文件绑定** | AI 生成代码的模糊匹配补丁应用 |
-| **轮次管理** | 跟踪多轮对话，处理工具调用后的连续响应 |
-| **输入处理** | 用户输入的预处理和钩子扩展 |
+| 功能         | 说明                      |
+| ---------- | ----------------------- |
+| **对话历史准备** | 构建系统提示词、处理角色卡、注入用户偏好    |
+| **对话总结**   | 自动总结长对话，支持增量总结          |
+| **工具执行链**  | 解析 XML 工具调用、执行工具、处理结果   |
+| **多服务管理**  | 不同功能使用不同模型（聊天/总结/识图/翻译） |
+| **文件绑定**   | AI 生成代码的模糊匹配补丁应用        |
+| **轮次管理**   | 跟踪多轮对话，处理工具调用后的连续响应     |
+| **输入处理**   | 用户输入的预处理和钩子扩展           |
 
 ### 1.2 在架构中的位置
 
@@ -58,7 +58,7 @@ LLMProvider 模块 (AI 服务接入)
 网络/本地推理引擎
 ```
 
----
+***
 
 ## 2. 核心设计思想
 
@@ -118,14 +118,14 @@ Enhance 模块采用**管道模式**处理对话请求，每个阶段负责特�
 
 ### 2.2 Hook 扩展机制
 
-Enhance 模块大量使用 **Hook 机制** 实现可扩展性。Hook 系统采用**"上下文 + 变更"模式**：Hook 接收只读上下文，返回可选的变更对象，多个 Hook 链式调用，每个 Hook 的输出作为下一个 Hook 的输入。
+Enhance 模块大量使用 **Hook 机制** 实现可扩展性。Hook 系统采用\*\*"上下文 + 变更"模式\*\*：Hook 接收只读上下文，返回可选的变更对象，多个 Hook 链式调用，每个 Hook 的输出作为下一个 Hook 的输入。
 
 #### 2.2.1 两套 Hook 注册表
 
-| 注册表 | 所在包 | 用途 |
-|--------|--------|------|
-| `PromptHookRegistry` | `core.chat.hooks` | 对话历史准备的 7 个阶段 |
-| `SummaryHookRegistry` | `core.chat.hooks` | 总结生成的各阶段 |
+| 注册表                   | 所在包               | 用途            |
+| --------------------- | ----------------- | ------------- |
+| `PromptHookRegistry`  | `core.chat.hooks` | 对话历史准备的 7 个阶段 |
+| `SummaryHookRegistry` | `core.chat.hooks` | 总结生成的各阶段      |
 
 此外还有 `MessageProcessingPluginRegistry`（`core.chat.plugins`），属于**插件机制**而非 Hook，允许完全接管消息处理流程。
 
@@ -133,15 +133,15 @@ Enhance 模块大量使用 **Hook 机制** 实现可扩展性。Hook 系统采�
 
 Prompt 构建过程分为 7 个阶段，每个阶段有独立的 Hook 接口和注册表：
 
-| 阶段 | Hook 接口 | 触发时机 | 可变更字段 |
-|------|----------|---------|-----------|
-| 输入处理 | `PromptInputHook` | 用户输入预处理 | `rawInput`, `processedInput` |
-| 历史准备 | `PromptHistoryHook` | 对话历史裁剪前/后 | `chatHistory`, `preparedHistory` |
-| 估算历史 | `PromptEstimateHistoryHook` | Token 估算时的历史裁剪 | `chatHistory`, `preparedHistory` |
-| 系统提示词 | `SystemPromptComposeHook` | 系统提示词组装时 | `systemPrompt` |
-| 工具提示词 | `ToolPromptComposeHook` | 工具描述组装时 | `toolPrompt` |
-| 最终确认 | `PromptFinalizeHook` | 所有内容组装完毕后 | 全部字段 |
-| 估算确认 | `PromptEstimateFinalizeHook` | Token 估算的最终确认 | 全部字段 |
+| 阶段    | Hook 接口                      | 触发时机           | 可变更字段                            |
+| ----- | ---------------------------- | -------------- | -------------------------------- |
+| 输入处理  | `PromptInputHook`            | 用户输入预处理        | `rawInput`, `processedInput`     |
+| 历史准备  | `PromptHistoryHook`          | 对话历史裁剪前/后      | `chatHistory`, `preparedHistory` |
+| 估算历史  | `PromptEstimateHistoryHook`  | Token 估算时的历史裁剪 | `chatHistory`, `preparedHistory` |
+| 系统提示词 | `SystemPromptComposeHook`    | 系统提示词组装时       | `systemPrompt`                   |
+| 工具提示词 | `ToolPromptComposeHook`      | 工具描述组装时        | `toolPrompt`                     |
+| 最终确认  | `PromptFinalizeHook`         | 所有内容组装完毕后      | 全部字段                             |
+| 估算确认  | `PromptEstimateFinalizeHook` | Token 估算的最终确认  | 全部字段                             |
 
 **调用位置**：
 
@@ -162,8 +162,8 @@ EnhancedAIService.estimateTokenCount()
 
 #### 2.2.3 SummaryHookRegistry — 总结生成 Hook
 
-| 阶段 | Hook 接口 | 触发时机 | 可变更字段 |
-|------|----------|---------|-----------|
+| 阶段   | Hook 接口               | 触发时机    | 可变更字段                                                                              |
+| ---- | --------------------- | ------- | ---------------------------------------------------------------------------------- |
 | 总结生成 | `SummaryGenerateHook` | 总结生成各阶段 | `chatHistory`, `preparedHistory`, `systemPrompt`, `summaryPrompt`, `summaryResult` |
 
 **调用位置**：
@@ -232,6 +232,7 @@ Hook 的分发采用**管道模式**，多个 Hook 依次执行：
 ```
 
 **关键特性**：
+
 - Hook 返回 `null` 表示不修改任何字段，直接跳过
 - `applyMutation` 采用**非空覆盖**策略：`mutation.field ?: current.field`
 - `metadata` 采用**合并**策略：`current.metadata + mutation.metadata`
@@ -252,13 +253,13 @@ data class PromptTurn(
 
 **扩展函数**：
 
-| 函数 | 说明 |
-|------|------|
-| `withContent(newContent)` | 替换内容（内容相同时返回原对象） |
-| `appendUserTurnIfMissing(message)` | 如果最后一条不是该用户消息则追加 |
-| `mergeAdjacentTurns()` | 合并相邻的同类型消息（SYSTEM/TOOL_CALL/TOOL_RESULT 不合并） |
-| `toRoleContentPairs()` | 转为 `List<Pair<String, String>>` |
-| `List<Pair<String, String>>.toPromptTurns()` | 从角色-内容对列表构建 |
+| 函数                                           | 说明                                             |
+| -------------------------------------------- | ---------------------------------------------- |
+| `withContent(newContent)`                    | 替换内容（内容相同时返回原对象）                               |
+| `appendUserTurnIfMissing(message)`           | 如果最后一条不是该用户消息则追加                               |
+| `mergeAdjacentTurns()`                       | 合并相邻的同类型消息（SYSTEM/TOOL\_CALL/TOOL\_RESULT 不合并） |
+| `toRoleContentPairs()`                       | 转为 `List<Pair<String, String>>`                |
+| `List<Pair<String, String>>.toPromptTurns()` | 从角色-内容对列表构建                                    |
 
 #### 2.2.7 MessageProcessingPluginRegistry — 消息处理插件
 
@@ -279,6 +280,7 @@ data class MessageProcessingExecution(
 ```
 
 **工作方式**：
+
 1. `AIMessageManager` 在发送消息前，先遍历所有插件
 2. 第一个返回非 null `MessageProcessingExecution` 的插件**完全接管**消息处理
 3. 后续插件和默认流程不再执行
@@ -322,14 +324,14 @@ ToolPkg JS 脚本注册的 Hook
 
 **JS Hook 返回值解析规则**：
 
-| Hook 类型 | 返回 String | 返回 JSONArray | 返回 JSONObject |
-|-----------|------------|---------------|----------------|
-| InputHook | → `processedInput` | — | 解析所有字段 |
-| HistoryHook | — | → `chatHistory`/`preparedHistory` | 解析所有字段 |
-| SystemPromptHook | → `systemPrompt` | — | 解析所有字段 |
-| ToolPromptHook | → `toolPrompt` | — | 解析所有字段 |
-| FinalizeHook | → `processedInput` | → `preparedHistory` | 解析所有字段 |
-| SummaryHook | → `summaryPrompt`/`summaryResult` | — | 解析所有字段 |
+| Hook 类型          | 返回 String                         | 返回 JSONArray                      | 返回 JSONObject |
+| ---------------- | --------------------------------- | --------------------------------- | ------------- |
+| InputHook        | → `processedInput`                | —                                 | 解析所有字段        |
+| HistoryHook      | —                                 | → `chatHistory`/`preparedHistory` | 解析所有字段        |
+| SystemPromptHook | → `systemPrompt`                  | —                                 | 解析所有字段        |
+| ToolPromptHook   | → `toolPrompt`                    | —                                 | 解析所有字段        |
+| FinalizeHook     | → `processedInput`                | → `preparedHistory`               | 解析所有字段        |
+| SummaryHook      | → `summaryPrompt`/`summaryResult` | —                                 | 解析所有字段        |
 
 **动态同步**：Bridge 监听 `PackageManager.ToolPkgRuntimeChangeListener`，当容器启用/禁用时自动更新 Hook 注册列表。
 
@@ -391,13 +393,13 @@ MessageProcessingPluginRegistry.unregister("my_echo_plugin")
 
 #### 2.2.10 线程安全与设计保障
 
-| 特性 | 实现方式 |
-|------|---------|
-| 注册表线程安全 | `CopyOnWriteArrayList` + `@Synchronized` 注册/注销 |
-| Hook 异常隔离 | `runCatching` 捕获，记录日志，不中断链式调用 |
-| 不可变上下文 | `PromptHookContext` 和 `SummaryHookContext` 为 `data class`，每次 `copy` 产生新实例 |
-| ID 去重 | 注册时先按 `id` 注销旧 Hook，确保同一 ID 只有一个实例 |
-| ToolPkg 动态同步 | `@Volatile` + `ToolPkgRuntimeChangeListener`，容器变更时原子更新 |
+| 特性           | 实现方式                                                                      |
+| ------------ | ------------------------------------------------------------------------- |
+| 注册表线程安全      | `CopyOnWriteArrayList` + `@Synchronized` 注册/注销                            |
+| Hook 异常隔离    | `runCatching` 捕获，记录日志，不中断链式调用                                             |
+| 不可变上下文       | `PromptHookContext` 和 `SummaryHookContext` 为 `data class`，每次 `copy` 产生新实例 |
+| ID 去重        | 注册时先按 `id` 注销旧 Hook，确保同一 ID 只有一个实例                                        |
+| ToolPkg 动态同步 | `@Volatile` + `ToolPkgRuntimeChangeListener`，容器变更时原子更新                    |
 
 ### 2.3 多服务分工
 
@@ -414,7 +416,7 @@ VIDEO_RECOGNITION   视频分析                    Gemini Pro Vision
 TRANSLATION         翻译（快速模型）              GPT-3.5 / 轻量模型
 ```
 
----
+***
 
 ## 3. 架构与代码结构
 
@@ -460,7 +462,7 @@ app/src/main/java/com/ai/assistance/operit/api/chat/enhance/
 └───────────────┘         └─────────────────┘
 ```
 
----
+***
 
 ## 4. ConversationService 对话服务
 
@@ -539,15 +541,15 @@ fun processChatMessageWithTools(
 
 **标签类型映射**：
 
-| XML 标签 | PromptTurnKind | 说明 |
-|---------|---------------|------|
-| `<text>` | ASSISTANT | 纯文本内容 |
-| `<think>` / `<thinking>` | ASSISTANT | 推理内容（DeepSeek） |
-| `<status type="complete">` | ASSISTANT | 任务完成状态 |
-| `<status type="wait_for_user_need">` | ASSISTANT | 等待用户输入 |
-| `<status>` (其他) | USER | 其他状态算作用户消息 |
-| `<tool_result>` | TOOL_RESULT | 工具执行结果 |
-| `<tool>` | TOOL_CALL | 工具调用 |
+| XML 标签                               | PromptTurnKind | 说明             |
+| ------------------------------------ | -------------- | -------------- |
+| `<text>`                             | ASSISTANT      | 纯文本内容          |
+| `<think>` / `<thinking>`             | ASSISTANT      | 推理内容（DeepSeek） |
+| `<status type="complete">`           | ASSISTANT      | 任务完成状态         |
+| `<status type="wait_for_user_need">` | ASSISTANT      | 等待用户输入         |
+| `<status>` (其他)                      | USER           | 其他状态算作用户消息     |
+| `<tool_result>`                      | TOOL\_RESULT   | 工具执行结果         |
+| `<tool>`                             | TOOL\_CALL     | 工具调用           |
 
 ### 4.4 对话总结
 
@@ -609,7 +611,7 @@ suspend fun analyzeVideoWithIntent(
 ): String
 ```
 
----
+***
 
 ## 5. ConversationRoundManager 轮次管理
 
@@ -655,7 +657,7 @@ class ConversationRoundManager {
 }
 ```
 
----
+***
 
 ## 6. ConversationMarkupManager 标记管理
 
@@ -699,7 +701,7 @@ object ConversationMarkupManager {
 }
 ```
 
----
+***
 
 ## 7. MultiServiceManager 多服务管理
 
@@ -762,7 +764,7 @@ class MultiServiceManager(private val context: Context) {
    └─ serviceInstances[functionType] = service
 ```
 
----
+***
 
 ## 8. ToolExecutionManager 工具执行
 
@@ -871,7 +873,7 @@ fun executeToolSafely(
 - 异常捕获
 - 错误通知
 
----
+***
 
 ## 9. InputProcessor 输入处理
 
@@ -904,7 +906,7 @@ after_process Hook
 处理后的输入
 ```
 
----
+***
 
 ## 10. FileBindingService 文件绑定
 
@@ -991,7 +993,7 @@ Changes: +5 -3 lines
   13|    }
 ```
 
----
+***
 
 ## 11. ReferenceManager 引用管理
 
@@ -1011,7 +1013,7 @@ object ReferenceManager {
 [标题](https://example.com)  →  AiReference(title="标题", url="https://example.com")
 ```
 
----
+***
 
 ## 12. 使用示例
 
@@ -1177,7 +1179,7 @@ suspend fun executeToolChain(response: String) {
 }
 ```
 
----
+***
 
 ## 13. 最佳实践
 
@@ -1288,7 +1290,7 @@ suspend fun safeApplyPatch(originalFile: File, patch: String): Boolean {
 }
 ```
 
----
+***
 
 ## 总结
 
@@ -1303,8 +1305,10 @@ Enhance 模块通过以下设计提供了完整的对话增强能力：
 7. **多模态支持**：图片、音频、视频的统一分析接口
 
 该模块在 Operit 项目中主要用于：
+
 - AI 聊天功能的对话流程控制
 - 工具调用链的执行和管理
 - 对话历史的构建和维护
 - 代码文件的 AI 辅助编辑
 - 多模型协同工作
+

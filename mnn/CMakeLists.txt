@@ -19,6 +19,9 @@ set(MNN_LOW_MEMORY ON CACHE BOOL "Use low memory mode" FORCE)
 set(MNN_SUPPORT_TRANSFORMER_FUSE ON CACHE BOOL "Support transformer fuse" FORCE)
 set(MNN_CPU_WEIGHT_DEQUANT_GEMM ON CACHE BOOL "CPU weight dequant gemm" FORCE)
 
+# 禁用 KleidiAI (需要下载外部依赖,容易失败)
+set(MNN_KLEIDIAI OFF CACHE BOOL "Enable KLEIDIAI" FORCE)
+
 # 启用 GPU 后端支持
 set(MNN_VULKAN ON CACHE BOOL "Enable Vulkan backend" FORCE)
 set(MNN_OPENCL ON CACHE BOOL "Enable OpenCL backend" FORCE)

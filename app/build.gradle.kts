@@ -375,7 +375,8 @@ dependencies {
 
     // Color picker for theme customization
     implementation(libs.colorpicker)
-    implementation(libs.backdrop)
+    // backdrop库使用Java 21编译,与项目Java 17不兼容,暂时禁用
+    // implementation(libs.backdrop)
     implementation(libs.liquid)
     
     // NanoHTTPD for local web server

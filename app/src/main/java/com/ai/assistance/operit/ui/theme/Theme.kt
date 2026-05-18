@@ -61,8 +61,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+// backdrop库使用Java 21编译,与项目Java 17不兼容,暂时禁用
+// import com.kyant.backdrop.backdrops.layerBackdrop
+// import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.fletchmckee.liquid.liquefiable
 import io.github.fletchmckee.liquid.rememberLiquidState
 
@@ -351,15 +352,17 @@ fun OperitTheme(content: @Composable () -> Unit) {
 
     // 应用主题和自定义背景
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val liquidGlassBackdrop = rememberLayerBackdrop()
+        // backdrop库暂时禁用
+        // val liquidGlassBackdrop = rememberLayerBackdrop()
         val waterGlassState = if (isWaterGlassSupported()) rememberLiquidState() else null
 
         CompositionLocalProvider(
-            LocalLiquidGlassBackdrop provides liquidGlassBackdrop,
+            // LocalLiquidGlassBackdrop provides liquidGlassBackdrop,
             LocalWaterGlassState provides waterGlassState,
         ) {
             Box(
-                modifier = Modifier.fillMaxSize().layerBackdrop(liquidGlassBackdrop)
+                modifier = Modifier.fillMaxSize()
+                // .layerBackdrop(liquidGlassBackdrop)
             ) {
                 Box(
                     modifier =
