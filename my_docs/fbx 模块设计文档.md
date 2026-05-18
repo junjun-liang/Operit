@@ -483,4 +483,592 @@ int EnsureMaterial(PreviewSession *session, const ufbx_material *material) {
     }
 
     // 透明度处理
-    float
+    float opacity = material_data.base_color[3];
+    if (pbr_opacity.has_value) opacity *= Clamp01(pbr_opacity.value_real);
+    else if (fbx_transparency_factor.has_value) opacity *= 1.0f - Clamp01(fbx_transparency_factor.value_real);
+    material_data.base_color[3] = Clamp01(opacity);
+
+    // 纹理
+    material_data.texture_index = EnsureTextureSlot(session, texture);
+
+    // Alpha Blend 判断
+    material_data.alpha_blend =
+        material_data.base_color[3] < 0.999f ||
+        pbr_opacity.texture_enabled ||
+        material->features.opacity.enabled;
+
+    return material_index;
+}
+```
+
+#### 4.2.8 纹理处理
+
+```cpp
+int EnsureTextureSlot(PreviewSession *session, const ufbx_texture *texture) {
+    // 提取内嵌字节
+    std::vector<uint8_t> embedded_bytes;
+    TryCopyEmbeddedBytes(file_texture->content, &embedded_bytes);
+    if (embedded_bytes.empty() && file_texture->video) {
+        TryCopyEmbeddedBytes(file_texture->video->content, &embedded_bytes);
+    }
+
+    // 解析外部文件路径
+    ExternalFileInfo external = ResolveExternalFileInfo(
+        session->model_path,
+        StringFromUfbx(file_texture->filename),
+        StringFromUfbx(file_texture->absolute_filename),
+        StringFromUfbx(file_texture->relative_filename));
+
+    // 缓存键
+    std::string key;
+    if (!embedded_bytes.empty()) key = "embedded:" + element_id;
+    else if (!external.resolved_path.empty()) key = "path:" + external.resolved_path;
+    else key = "texture:" + element_id;
+
+    // 检查缓存
+    auto existing = session->texture_cache.find(key);
+    if (existing != session->texture_cache.end()) return existing->second;
+
+    // 创建新纹理槽
+    TextureSlotData slot;
+    slot.label = external.display_path.empty() ? texture_name : external.display_path;
+    slot.resolved_path = external.resolved_path;
+    slot.embedded_bytes = std::move(embedded_bytes);
+
+    int index = session->textures.size();
+    session->textures.push_back(std::move(slot));
+    session->texture_cache.emplace(key, index);
+    return index;
+}
+```
+
+---
+
+## 5. Kotlin API 层
+
+### 5.1 FbxNative — JNI 接口对象
+
+[FbxNative.kt](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/src/main/java/com/ai/assistance/fbx/FbxNative.kt)
+
+```kotlin
+object FbxNative {
+
+    init { FbxLibraryLoader.loadLibraries() }
+
+    @JvmStatic external fun nativeIsAvailable(): Boolean
+    @JvmStatic external fun nativeGetUnavailableReason(): String
+    @JvmStatic external fun nativeGetLastError(): String
+
+    // 模型检测
+    @JvmStatic external fun nativeInspectModel(pathModel: String): String?
+
+    // 预览会话管理
+    @JvmStatic external fun nativeCreatePreviewSession(pathModel: String): Long
+    @JvmStatic external fun nativeDestroyPreviewSession(sessionHandle: Long)
+    @JvmStatic external fun nativeReadPreviewInfo(sessionHandle: Long): String?
+
+    // 帧构建
+    @JvmStatic external fun nativeBuildPreviewFrame(
+        sessionHandle: Long,
+        animationName: String?,
+        timeSeconds: Double
+    ): FloatArray?
+
+    // 内嵌纹理读取
+    @JvmStatic external fun nativeReadEmbeddedTextureBytes(
+        sessionHandle: Long,
+        textureIndex: Int
+    ): ByteArray?
+}
+```
+
+### 5.2 FbxInspector — 模型检测
+
+[FbxInspector.kt](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/src/main/java/com/ai/assistance/fbx/FbxInspector.kt)
+
+```kotlin
+data class FbxModelInfo(
+    val modelName: String,
+    val animationNames: List<String>,
+    val animationDurationMillisByName: Map<String, Long>,
+    val requiredExternalFiles: List<String>,
+    val missingExternalFiles: List<String>
+) {
+    val defaultAnimation: String?
+        get() = animationNames.firstOrNull()
+}
+
+object FbxInspector {
+    fun isAvailable(): Boolean = FbxNative.nativeIsAvailable()
+    fun unavailableReason(): String = FbxNative.nativeGetUnavailableReason()
+    fun getLastError(): String = FbxNative.nativeGetLastError()
+
+    fun inspectModel(pathModel: String): FbxModelInfo? {
+        val rawJson = FbxNative.nativeInspectModel(pathModel) ?: return null
+        return runCatching {
+            val root = JSONObject(rawJson)
+            val animationNames = root.optJSONArray("animationNames").toStringList()
+            val animationDurations = root.optJSONArray("animationDurationsMillis")
+            val durationMap = buildMap {
+                animationNames.forEachIndexed { index, animationName ->
+                    val durationMillis = animationDurations?.optLong(index, 0L)?.coerceAtLeast(0L) ?: 0L
+                    if (durationMillis > 0L) put(animationName, durationMillis)
+                }
+            }
+
+            FbxModelInfo(
+                modelName = root.optString("modelName").ifBlank {
+                    pathPath.substringAfterLast('/').substringBeforeLast('.')
+                },
+                animationNames = animationNames,
+                animationDurationMillisByName = durationMap,
+                requiredExternalFiles = root.optJSONArray("requiredExternalFiles").toStringList(),
+                missingExternalFiles = root.optJSONArray("missingExternalFiles").toStringList()
+            )
+        }.getOrNull()
+    }
+}
+```
+
+### 5.3 FbxGlSurfaceView — OpenGL 渲染视图
+
+[FbxGlSurfaceView.kt](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/src/main/java/com/ai/assistance/fbx/FbxGlSurfaceView.kt)
+
+```kotlin
+class FbxGlSurfaceView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : GLSurfaceView(context, attrs) {
+
+    private val renderer = FbxPreviewRenderer(context.applicationContext)
+
+    init {
+        setEGLContextClientVersion(2)           // OpenGL ES 2.0
+        setEGLConfigChooser(8, 8, 8, 8, 16, 0) // RGBA8, Depth16
+        setZOrderOnTop(true)
+        setBackgroundColor(Color.TRANSPARENT)
+        holder.setFormat(PixelFormat.TRANSLUCENT)
+        preserveEGLContextOnPause = true
+        setRenderer(renderer)
+        renderMode = RENDERMODE_CONTINUOUSLY
+    }
+
+    fun setModelPath(path: String) {
+        queueEvent { renderer.setModelPath(path) }
+    }
+
+    fun setAnimationState(animationName: String?, isLooping: Boolean, playbackNonce: Long) {
+        queueEvent { renderer.setAnimationState(animationName, isLooping, playbackNonce) }
+    }
+
+    fun setCameraPose(pitchDegrees: Float, yawDegrees: Float, distanceScale: Float, targetHeightOffset: Float) {
+        queueEvent { renderer.setCameraPose(pitchDegrees, yawDegrees, distanceScale, targetHeightOffset) }
+    }
+
+    fun setOnRenderErrorListener(listener: ((String) -> Unit)?) {
+        renderer.setOnErrorListener(listener)
+    }
+
+    fun setOnAnimationsDiscoveredListener(listener: ((List<String>, Map<String, Long>) -> Unit)?) {
+        renderer.setOnAnimationsDiscoveredListener(listener)
+    }
+
+    override fun onDetachedFromWindow() {
+        queueEvent { renderer.release() }
+        super.onDetachedFromWindow()
+    }
+}
+```
+
+### 5.4 FbxPreviewRenderer — GL 渲染器实现
+
+`FbxPreviewRenderer` 是 `GLSurfaceView.Renderer` 的实现，负责：
+
+- **Shader 编译**：顶点着色器 + 片段着色器
+- **顶点缓冲管理**：`FloatBuffer`，每顶点 8 float（位置 3 + 法线 3 + UV 2）
+- **纹理加载**：从文件或内嵌字节加载 `Bitmap` 并上传到 GPU
+- **相机控制**：透视投影 + LookAt 轨道相机
+- **动画播放**：基于时间计算当前帧，调用 `nativeBuildPreviewFrame`
+- **透明度排序**：先绘制不透明物体，再绘制透明物体（关闭深度写入）
+
+**Shader 代码**：
+
+```glsl
+// 顶点着色器
+uniform mat4 uViewProjectionMatrix;
+attribute vec3 aPosition;
+attribute vec3 aNormal;
+attribute vec2 aTexCoord;
+varying vec3 vNormal;
+varying vec2 vTexCoord;
+void main() {
+    vNormal = normalize(aNormal);
+    vTexCoord = aTexCoord;
+    gl_Position = uViewProjectionMatrix * vec4(aPosition, 1.0);
+}
+
+// 片段着色器
+precision mediump float;
+varying vec3 vNormal;
+varying vec2 vTexCoord;
+uniform vec4 uBaseColor;
+uniform sampler2D uBaseTexture;
+uniform float uUseBaseTexture;
+void main() {
+    vec3 lightDir = normalize(vec3(0.25, 0.80, 1.0));
+    float diffuse = max(dot(normalize(vNormal), lightDir), 0.0);
+    float lighting = 0.38 + diffuse * 0.62;
+    vec4 textureColor = vec4(1.0);
+    if (uUseBaseTexture > 0.5) {
+        textureColor = texture2D(uBaseTexture, vec2(vTexCoord.x, 1.0 - vTexCoord.y));
+    }
+    vec4 color = vec4(uBaseColor.rgb * textureColor.rgb * lighting, uBaseColor.a * textureColor.a);
+    gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), clamp(color.a, 0.0, 1.0));
+}
+```
+
+**相机计算**：
+
+```kotlin
+// 透视投影
+Matrix.perspectiveM(projectionMatrix, 0, 45f, aspectRatio, radius/200f, radius*40f)
+
+// 轨道相机位置
+val pitchRadians = Math.toRadians(cameraPitchDegrees.toDouble())
+val yawRadians = Math.toRadians(cameraYawDegrees.toDouble())
+val distance = max(info.radius * 3.0f, 1.25f) * cameraDistanceScale
+val eyeX = targetX + (distance * cos(pitchRadians) * sin(yawRadians)).toFloat()
+val eyeY = targetY + (distance * sin(pitchRadians)).toFloat()
+val eyeZ = targetZ + (distance * cos(pitchRadians) * cos(yawRadians)).toFloat()
+
+Matrix.setLookAtM(viewMatrix, 0, eyeX, eyeY, eyeZ, targetX, targetY, targetZ, 0f, 1f, 0f)
+Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+```
+
+**动画时间计算**：
+
+```kotlin
+val animationName = requestedAnimationName?.takeIf { info.animationNames.contains(it) }
+val durationSeconds = animationName?.let { info.animationDurationMillisByName[it] }?.let { it / 1000.0 }
+val elapsedSeconds = (System.nanoTime() - animationStartNanos).toDouble() / 1_000_000_000.0
+val sampleTimeSeconds = when {
+    durationSeconds == null -> elapsedSeconds
+    requestedLooping -> elapsedSeconds % durationSeconds
+    else -> min(elapsedSeconds, durationSeconds)
+}
+```
+
+---
+
+## 6. 项目中的使用方式
+
+### 6.1 FbxRenderer — Compose 视图
+
+[FbxRenderer.kt](file:///home/meizu/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/core/avatar/impl/fbx/view/FbxRenderer.kt)
+
+```kotlin
+@Composable
+fun FbxRenderer(
+    modifier: Modifier,
+    model: FbxAvatarModel,
+    controller: AvatarController,
+    onError: (String) -> Unit
+) {
+    val fbxController = controller as? FbxAvatarController
+        ?: throw IllegalArgumentException("FbxRenderer requires a FbxAvatarController")
+
+    val scale by fbxController.scale.collectAsState()
+    val translateX by fbxController.translateX.collectAsState()
+    val translateY by fbxController.translateY.collectAsState()
+    val cameraPitch by fbxController.cameraPitch.collectAsState()
+    val cameraYaw by fbxController.cameraYaw.collectAsState()
+    val cameraDistanceScale by fbxController.cameraDistanceScale.collectAsState()
+    val cameraTargetHeight by fbxController.cameraTargetHeight.collectAsState()
+    val avatarState by fbxController.state.collectAsState()
+
+    val safeScale = scale.coerceIn(0.2f, 5.0f)
+
+    // 生命周期管理
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val surfaceViewState = remember { mutableStateOf<FbxGlSurfaceView?>(null) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> surfaceViewState.value?.onResume()
+                Lifecycle.Event.ON_PAUSE -> surfaceViewState.value?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            surfaceViewState.value?.onPause()
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .scale(safeScale)
+            .offset(x = translateX.dp, y = translateY.dp)
+            .background(Color.Transparent)
+    ) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                FbxGlSurfaceView(context).apply {
+                    surfaceViewState.value = this
+                    setOnRenderErrorListener { message ->
+                        renderErrorState.value = message
+                        onError(message)
+                    }
+                    setOnAnimationsDiscoveredListener { animationNames, durationMillisByName ->
+                        fbxController.updateAnimationMetadata(animationNames, durationMillisByName)
+                    }
+                    setModelPath(model.modelPath)
+                    setAnimationState(avatarState.currentAnimation, avatarState.isLooping, avatarState.playbackNonce)
+                    setCameraPose(cameraPitch, cameraYaw, cameraDistanceScale, cameraTargetHeight)
+                    onResume()
+                }
+            },
+            update = { view ->
+                surfaceViewState.value = view
+                view.setModelPath(model.modelPath)
+                view.setAnimationState(avatarState.currentAnimation, avatarState.isLooping, avatarState.playbackNonce)
+                view.setCameraPose(cameraPitch, cameraYaw, cameraDistanceScale, cameraTargetHeight)
+            }
+        )
+
+        // 错误提示
+        renderErrorState.value?.let { error ->
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f)
+            ) {
+                Text(text = error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+```
+
+---
+
+## 7. 构建配置
+
+### 7.1 fbx/CMakeLists.txt
+
+[CMakeLists.txt](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/CMakeLists.txt)
+
+```cmake
+cmake_minimum_required(VERSION 3.22.1)
+project("fbx_jni")
+
+add_library(
+    FbxWrapper
+    SHARED
+    src/main/cpp/fbx_jni.cpp
+    third_party/ufbx/ufbx.c
+)
+
+set_target_properties(
+    FbxWrapper
+    PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)
+
+target_include_directories(
+    FbxWrapper
+    PRIVATE
+    third_party/ufbx
+)
+
+target_link_libraries(
+    FbxWrapper
+    log
+)
+
+# 16KB page size support (Android 15+)
+target_link_options(FbxWrapper PRIVATE "-Wl,-z,max-page-size=16384")
+```
+
+### 7.2 fbx/build.gradle.kts
+
+[build.gradle.kts](file:///home/meizu/Documents/my_agent_projects/Operit/fbx/build.gradle.kts)
+
+```kotlin
+android {
+    namespace = "com.ai.assistance.fbx"
+    compileSdk = 36
+    defaultConfig {
+        minSdk = 26
+        targetSdk = 34
+        ndk { abiFilters.addAll(listOf("arm64-v8a")) }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17")
+                arguments += listOf(
+                    "-DANDROID_STL=c++_static",
+                    "-DANDROID_PLATFORM=android-26",
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                )
+            }
+        }
+    }
+}
+```
+
+### 7.3 关键构建选项
+
+| 选项 | 值 | 说明 |
+|------|-----|------|
+| C_STANDARD | 99 | ufbx 使用 C99 |
+| CXX_STANDARD | 17 | JNI 桥接使用 C++17 |
+| max-page-size=16384 | 链接选项 | Android 15+ 16KB 对齐 |
+| ufbx.c | 单文件库 | 零依赖 FBX 解析 |
+
+---
+
+## 8. 使用方法
+
+### 8.1 检测模型信息
+
+```kotlin
+import com.ai.assistance.fbx.FbxInspector
+
+// 检查模块是否可用
+if (!FbxInspector.isAvailable()) {
+    println("不可用: ${FbxInspector.unavailableReason()}")
+    return
+}
+
+// 检测模型
+val modelInfo = FbxInspector.inspectModel("/path/to/model.fbx")
+modelInfo?.let {
+    println("模型名称: ${it.modelName}")
+    println("动画列表: ${it.animationNames}")
+    it.animationDurationMillisByName.forEach { (name, duration) ->
+        println("  $name: ${duration}ms")
+    }
+    println("需要的外部文件: ${it.requiredExternalFiles}")
+    println("缺失的外部文件: ${it.missingExternalFiles}")
+}
+```
+
+### 8.2 在 Compose 中使用 FbxGlSurfaceView
+
+```kotlin
+import com.ai.assistance.fbx.FbxGlSurfaceView
+import androidx.compose.ui.viewinterop.AndroidView
+
+@Composable
+fun FbxViewer(
+    modelPath: String,
+    animationName: String? = null,
+    isLooping: Boolean = false
+) {
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { context ->
+            FbxGlSurfaceView(context).apply {
+                setModelPath(modelPath)
+                setAnimationState(animationName, isLooping, playbackNonce = 0L)
+                setCameraPose(pitchDegrees = 8f, yawDegrees = 0f, distanceScale = 1f, targetHeightOffset = 0f)
+                setOnRenderErrorListener { error ->
+                    Log.e("FbxViewer", "Render error: $error")
+                }
+                setOnAnimationsDiscoveredListener { animationNames, durations ->
+                    Log.d("FbxViewer", "Discovered animations: $animationNames")
+                }
+            }
+        },
+        update = { view ->
+            view.setModelPath(modelPath)
+            view.setAnimationState(animationName, isLooping, playbackNonce = 0L)
+        }
+    )
+}
+```
+
+### 8.3 Avatar 系统集成
+
+```kotlin
+// 创建 Avatar 模型
+val fbxModel = FbxAvatarModel(
+    modelPath = "/path/to/model.fbx",
+    basePath = "/path/to/textures/",
+    displayMotionNames = listOf("Idle", "Walk", "Run")
+)
+
+// 创建控制器
+val controller = rememberFbxAvatarController(fbxModel)
+
+// 设置情绪动画映射
+controller.updateEmotionAnimationMapping(mapOf(
+    AvatarEmotion.IDLE to "Idle",
+    AvatarEmotion.HAPPY to "Happy",
+    AvatarEmotion.SAD to "Sad"
+))
+
+// 播放情绪
+controller.setEmotion(AvatarEmotion.HAPPY)
+
+// 更新相机设置
+controller.updateSettings(mapOf(
+    AvatarSettingKeys.SCALE to 1.5f,
+    AvatarSettingKeys.FBX_CAMERA_DISTANCE_SCALE to 2.0f,
+    AvatarSettingKeys.FBX_CAMERA_PITCH to 15f,
+    AvatarSettingKeys.FBX_CAMERA_YAW to 45f
+))
+
+// Compose 渲染
+FbxRenderer(
+    modifier = Modifier.fillMaxSize(),
+    model = fbxModel,
+    controller = controller,
+    onError = { error -> Log.e("Fbx", error) }
+)
+```
+
+---
+
+## 9. 文件索引
+
+### Kotlin API 层
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| FbxLibraryLoader.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxLibraryLoader.kt` | 库加载器 |
+| FbxNative.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxNative.kt` | JNI 接口对象 |
+| FbxInspector.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxInspector.kt` | 模型检测 |
+| FbxGlSurfaceView.kt | `fbx/src/main/java/com/ai/assistance/fbx/FbxGlSurfaceView.kt` | OpenGL 渲染视图 + 渲染器 |
+
+### C++ JNI 桥接层
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| fbx_jni.cpp | `fbx/src/main/cpp/fbx_jni.cpp` | 核心 JNI 实现 |
+
+### ufbx 引擎核心
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| ufbx.c | `fbx/third_party/ufbx/ufbx.c` | ufbx 单文件库实现 |
+| ufbx.h | `fbx/third_party/ufbx/ufbx.h` | ufbx 头文件 |
+
+### 业务封装层
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| FbxRenderer.kt | `app/src/main/java/.../avatar/impl/fbx/view/FbxRenderer.kt` | Compose 视图 |
+
+### 构建配置
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| CMakeLists.txt | `fbx/CMakeLists.txt` | CMake 构建配置 |
+| build.gradle.kts | `fbx/build.gradle.kts` | Gradle 构建配置 |
