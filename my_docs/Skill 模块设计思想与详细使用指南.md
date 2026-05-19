@@ -1,493 +1,547 @@
 # Skill 模块设计思想与详细使用指南
 
-## 一、模块概述
+## 1. 模块概述
 
-`skill` 模块是 Operit AI 的**技能包管理系统**，负责发现、加载和管理基于 Markdown 的 Skill 包。Skill 是一种轻量级的 AI 能力扩展方式，开发者通过编写 `SKILL.md` 文件来定义 AI 的行为模式、专业知识和任务执行策略，无需编写 JavaScript 代码即可为 AI 注入新的专业能力。
+`skill` 模块是 Operit AI 的**技能（Skill）插件系统**，允许用户通过 Markdown 文件（`SKILL.md`）定义可复用的 AI 指令集、工作流脚本和知识库。Skill 可以被 AI 动态加载，扩展 AI 的能力边界，实现从简单提示词模板到复杂自动化任务的 anything-in-markdown 插件生态。
 
-### 1.1 核心定位
-
-- **技能发现引擎**：扫描外部存储中的技能目录
-- **技能加载器**：解析 SKILL.md 元数据和内容
-- **系统提示词生成器**：将 Skill 内容转换为 AI 系统提示词
-- **技能包管理器**：支持导入、删除和浏览技能包
-
-### 1.2 模块结构
-
-```
-skill/
-├── SkillManager.kt    # 核心管理器：技能生命周期管理
-└── SkillPackage.kt    # 数据模型：技能包定义
-```
-
-### 1.3 与传统包的区别
-
-| 特性 | Skill 包 | 传统 JS 包 | ToolPkg 容器 |
-|------|---------|-----------|-------------|
-| **格式** | Markdown (SKILL.md) | JavaScript/HJSON | ZIP 归档 (.toolpkg) |
-| **复杂度** | 低（纯文本） | 中（代码+元数据） | 高（多文件+资源） |
-| **执行方式** | 注入系统提示词 | JavaScript 执行 | JavaScript 执行 |
-| **工具定义** | 无（依赖现有工具） | 可定义新工具 | 可定义新工具 |
-| **适用场景** | 行为模式、专业知识 | 自定义工具逻辑 | 完整应用扩展 |
+模块核心路径：
+- 数据层：`com.ai.assistance.operit.data.skill`
+- 核心逻辑：`com.ai.assistance.operit.core.tools.skill`
+- 配置层：`com.ai.assistance.operit.data.preferences`
+- 市场层：`com.ai.assistance.operit.ui.features.packages`
 
 ---
 
-## 二、核心设计思想
+## 2. 核心设计思想
 
-### 2.1 目录驱动发现模型
+### 2.1 Markdown-First 插件格式
 
-Skill 模块采用**目录驱动**的发现模型，所有技能包统一存放在固定目录结构中：
-
-```
-/sdcard/Download/Operit/skills/          # 技能根目录
-├── my-skill/                            # 技能包目录
-│   ├── SKILL.md                         # 技能定义文件（必需）
-│   ├── README.md                        # 补充说明（可选）
-│   └── examples/                        # 示例文件（可选）
-│       └── sample.txt
-└── another-skill/
-    ├── skill.md                         # 小写文件名也支持
-    └── ...
-```
-
-**设计要点**：
-- **固定路径**：`Download/Operit/skills/`，便于用户手动管理
-- **目录即包**：每个子目录代表一个独立的技能包
-- **SKILL.md 为入口**：通过解析 SKILL.md 获取技能元数据和内容
-- **大小写不敏感**：支持 `SKILL.md` 和 `skill.md`
-
-### 2.2 元数据解析机制
-
-SkillManager 支持两种元数据格式：
-
-#### Frontmatter 格式（推荐）
+Skill 采用纯 Markdown 作为插件格式，降低创作门槛：
 
 ```markdown
 ---
-name: "Python Expert"
-description: "A skill for Python code review and optimization"
+name: "代码审查助手"
+description: "帮助审查代码变更，提供改进建议"
 ---
 
-# Python Expert
+# 代码审查助手
 
-You are an expert Python developer with deep knowledge of...
+## 角色设定
+你是一位经验丰富的代码审查专家...
+
+## 审查清单
+- [ ] 代码风格一致性
+- [ ] 潜在的空指针风险
+- [ ] 性能优化建议
+- [ ] 安全漏洞检查
+
+## 输出格式
+```
+## 审查结果
+
+**文件**: {filename}
+**风险等级**: {low|medium|high}
+**建议**: {suggestion}
+```
 ```
 
-#### 头部键值对格式（兼容）
+### 2.2 文件系统即数据库
 
-```markdown
-name: "Python Expert"
-description: "A skill for Python code review and optimization"
+Skill 不依赖数据库存储内容，而是直接扫描文件系统：
 
-# Python Expert
-
-You are an expert Python developer with deep knowledge of...
+```
+/sdcard/Download/Operit/skills/
+├── code-reviewer/
+│   ├── SKILL.md          # 主技能文件
+│   ├── assets/
+│   │   └── template.json # 附加资源
+│   └── scripts/
+│       └── analyze.sh    # 辅助脚本
+├── git-helper/
+│   └── SKILL.md
+└── ...
 ```
 
-**解析逻辑**：
-1. 首先检查是否有 YAML Frontmatter（`---` 包围）
-2. 如果没有，扫描前 40 行查找 `name:` 和 `description:` 键
-3. 支持引号包裹的值（自动去除引号）
+### 2.3 三层架构（Manager → Repository → ViewModel）
 
-### 2.3 系统提示词生成
+| 层级 | 职责 | 核心类 |
+|------|------|--------|
+| **核心层** | 文件扫描、解析、系统提示词生成 | `SkillManager` |
+| **数据层** | 导入/导出、GitHub 集成、ZIP 处理 | `SkillRepository` |
+| **UI 层** | 市场浏览、发布、安装、配置 | `SkillMarketViewModel` |
 
-Skill 的核心价值在于将 SKILL.md 内容转换为 AI 系统提示词：
+### 2.4 可见性控制
+
+每个 Skill 可以独立设置是否对 AI 可见，通过 `SkillVisibilityPreferences` 持久化：
 
 ```kotlin
-fun getSkillSystemPrompt(skillName: String): String? {
-    val content = skill.skillFile.readText()
-    
-    return buildString {
-        appendLine("Using package (Skill): ${skill.name}")
-        appendLine("Use Time: ${java.time.LocalDateTime.now()}")
-        appendLine("Execution policy:")
-        appendLine("Prioritize using the skill-provided instructions and bundled scripts, and complete tasks with terminal-related tools.")
-        if (skill.description.isNotBlank()) {
-            appendLine("Description: ${skill.description}")
-        }
-        appendLine("SKILL.md path: ${skill.skillFile.absolutePath}")
-        appendLine("Skill directory: ${skill.directory.absolutePath}")
-        appendLine("Directory structure:")
-        appendLine(buildDirectoryTreeText(skill.directory))
-        appendLine()
-        appendLine("SKILL.md:")
-        appendLine(content)
-    }
-}
+// 默认所有 Skill 对 AI 可见
+val isVisible = skillVisibilityPreferences.isSkillVisibleToAi("code-reviewer")
+
+// 关闭特定 Skill
+skillVisibilityPreferences.setSkillVisibleToAi("code-reviewer", false)
 ```
-
-**生成的提示词结构**：
-
-```
-Using package (Skill): Python Expert
-Use Time: 2024-01-15T10:30:00
-Execution policy:
-Prioritize using the skill-provided instructions and bundled scripts, and complete tasks with terminal-related tools.
-Description: A skill for Python code review and optimization
-SKILL.md path: /sdcard/Download/Operit/skills/python-expert/SKILL.md
-Skill directory: /sdcard/Download/Operit/skills/python-expert
-Directory structure:
-- SKILL.md
-- README.md
-- examples/
-  - sample.py
-  - output.txt
-
-SKILL.md:
----
-name: "Python Expert"
-description: "A skill for Python code review and optimization"
----
-
-You are an expert Python developer...
-```
-
-### 2.4 轻量级架构设计
-
-Skill 模块 intentionally 保持极简设计：
-
-```
-┌─────────────────────────────────────┐
-│           SkillManager              │
-│  ┌─────────────────────────────┐    │
-│  │    availableSkills          │    │
-│  │    Map<String, SkillPackage>│    │
-│  └─────────────────────────────┘    │
-│  ┌─────────────────────────────┐    │
-│  │    skillLoadErrors          │    │
-│  │    Map<String, String>      │    │
-│  └─────────────────────────────┘    │
-└─────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────┐
-│           SkillPackage              │
-│  - name: String                     │
-│  - description: String              │
-│  - directory: File                  │
-│  - skillFile: File                  │
-└─────────────────────────────────────┘
-```
-
-**设计原则**：
-- **无状态**：每次调用 `refreshAvailableSkills()` 重新扫描
-- **无持久化**：不依赖 SharedPreferences，完全基于文件系统
-- **无执行引擎**：不编译或执行代码，纯文本注入
-- **单例模式**：`SkillManager.getInstance(context)` 获取唯一实例
 
 ---
 
-## 三、详细使用方法
+## 3. 核心类详解
 
-### 3.1 基础操作
-
-#### 获取 SkillManager 实例
+### 3.1 SkillPackage — 技能包数据模型
 
 ```kotlin
-val skillManager = SkillManager.getInstance(context)
-```
-
-#### 获取可用技能列表
-
-```kotlin
-// 获取所有可用技能（自动刷新）
-val skills = skillManager.getAvailableSkills()
-skills.forEach { (name, skill) ->
-    println("Skill: $name, Description: ${skill.description}")
-}
-
-// 获取技能和错误信息
-val (skills, errors) = skillManager.getAvailableSkillsSnapshot()
-errors.forEach { (dirName, error) ->
-    println("Error loading $dirName: $error")
-}
-```
-
-#### 读取技能内容
-
-```kotlin
-// 读取 SKILL.md 完整内容
-val content = skillManager.readSkillContent("Python Expert")
-println(content)
-```
-
-#### 获取技能系统提示词
-
-```kotlin
-// 生成用于 AI 的系统提示词
-val systemPrompt = skillManager.getSkillSystemPrompt("Python Expert")
-// 返回完整的提示词文本，包含目录结构和 SKILL.md 内容
-```
-
-### 3.2 技能导入
-
-#### 从 ZIP 导入
-
-```kotlin
-// 导入 ZIP 文件中的技能
-val result = skillManager.importSkillFromZip(File("/sdcard/Download/python-expert.zip"))
-// 返回: "Skill imported: python-expert" 或错误信息
-
-// 从 ZIP 中的子目录导入
-val result = skillManager.importSkillFromZip(
-    zipFile = File("/sdcard/Download/bundle.zip"),
-    subDirPathInZip = "skills/python-expert"
+data class SkillPackage(
+    val name: String,           // 技能名称（来自 Frontmatter 或目录名）
+    val description: String,    // 技能描述
+    val directory: File,        // 技能根目录
+    val skillFile: File         // SKILL.md 文件路径
 )
 ```
 
-**ZIP 导入逻辑**：
-1. 解压 ZIP 到临时目录
-2. 查找 SKILL.md / skill.md（支持子目录指定）
-3. 解析元数据获取技能名称
-4. 复制到 `Download/Operit/skills/<name>/`
-5. 刷新技能缓存
+### 3.2 SkillManager — 技能管理器
 
-#### 手动放置
+`SkillManager` 是单例类，负责 Skill 的**本地生命周期管理**：
 
-用户也可以手动创建技能目录：
+#### 核心职责
+
+| 方法 | 职责 |
+|------|------|
+| `refreshAvailableSkills()` | 扫描 skills 目录，解析所有 SKILL.md |
+| `getAvailableSkills()` | 获取所有可用技能（自动刷新） |
+| `readSkillContent(name)` | 读取指定技能的 SKILL.md 内容 |
+| `deleteSkill(name)` | 删除技能（递归删除目录） |
+| `getSkillSystemPrompt(name)` | 生成供 AI 使用的系统提示词 |
+| `importSkillFromZip(zip, subDir?)` | 从 ZIP 导入技能 |
+
+#### Frontmatter 解析
+
+```kotlin
+private fun parseSkillMetadata(skillFile: File): Pair<String, String> {
+    // 支持 YAML Frontmatter 格式
+    // ---
+    // name: "技能名称"
+    // description: "技能描述"
+    // ---
+
+    // 回退：在文件前 40 行搜索 name:/description:
+}
+```
+
+#### 系统提示词生成
+
+`getSkillSystemPrompt()` 将 Skill 转换为 AI 可理解的系统提示词：
+
+```
+Using package (Skill): 代码审查助手
+Use Time: 2024-01-15T10:30:00
+Execution policy:
+Prioritize using the skill-provided instructions and bundled scripts, and complete tasks with terminal-related tools.
+Description: 帮助审查代码变更，提供改进建议
+SKILL.md path: /sdcard/Download/Operit/skills/code-reviewer/SKILL.md
+Skill directory: /sdcard/Download/Operit/skills/code-reviewer
+Directory structure:
+- SKILL.md
+- assets/
+  - template.json
+- scripts/
+  - analyze.sh
+
+SKILL.md:
+[完整 SKILL.md 内容]
+```
+
+### 3.3 SkillRepository — 技能仓库
+
+`SkillRepository` 封装了**所有外部导入渠道**，是 Skill 的入口网关：
+
+#### 导入渠道
+
+| 方法 | 来源 | 场景 |
+|------|------|------|
+| `importSkillFromZip(zip)` | 本地 ZIP 文件 | 用户手动导入 |
+| `importSkillFromGitHubRepo(url)` | GitHub 仓库 | 从市场或链接安装 |
+| `importSkillFromDirectInput(...)` | 直接输入 | 快速创建简单 Skill |
+
+#### GitHub 导入流程
+
+```kotlin
+suspend fun importSkillFromGitHubRepo(repoUrl: String): String {
+    // 1. 解析 GitHub URL
+    //    支持: github.com/owner/repo
+    //          github.com/owner/repo/tree/branch/subdir
+    //          raw.githubusercontent.com/owner/repo/branch/path
+
+    // 2. 获取默认分支（如果未指定）
+    val ref = getGithubDefaultBranch(owner, repoName) ?: "main"
+
+    // 3. 下载 ZIP（带缓存池复用）
+    val zipUrl = "https://codeload.github.com/$owner/$repoName/zip/$ref"
+    val zipFile = SkillRepoZipPoolManager.getOrDownloadZip(key) { downloadTo -> ... }
+
+    // 4. 解压并导入
+    val result = skillManager.importSkillFromZip(zipFile, subDir)
+
+    // 5. 写入 .operit_repo_url 标记文件（用于检测已安装状态）
+    File(skillDir, ".operit_repo_url").writeText(repoUrl)
+}
+```
+
+#### 直接输入导入
+
+```kotlin
+suspend fun importSkillFromDirectInput(
+    skillId: String,           // 技能标识（如 "my-helper"）
+    description: String,       // 技能描述
+    content: String,           // SKILL.md 内容
+    attachmentUris: List<Uri> = emptyList()  // 附件文件
+): String
+```
+
+自动生成的 SKILL.md 格式：
+
+```markdown
+---
+name: "my-helper"
+description: "我的自定义助手"
+---
+
+[用户输入的 content]
+```
+
+### 3.4 SkillVisibilityPreferences — 可见性偏好
+
+使用 SHA-256 哈希作为键，避免特殊字符问题：
+
+```kotlin
+class SkillVisibilityPreferences private constructor(context: Context) {
+    fun isSkillVisibleToAi(skillName: String): Boolean
+    fun setSkillVisibleToAi(skillName: String, visible: Boolean)
+}
+```
+
+键生成逻辑：
+
+```kotlin
+private fun keyForSkillName(skillName: String): String {
+    val hash = SHA256(skillName.trim().toByteArray())
+    return "skill_visible_${hex.take(16)}"
+}
+```
+
+### 3.5 SkillRepoZipPoolManager — ZIP 缓存池
+
+用于缓存从 GitHub 下载的 ZIP 文件，避免重复下载：
+
+```kotlin
+object SkillRepoZipPoolManager {
+    var maxPoolSize = 6  // 最大缓存数量
+
+    suspend fun getOrDownloadZip(
+        key: String,                           // 缓存键（如 "owner/repo@branch"）
+        downloadTo: suspend (File) -> Boolean  // 下载逻辑
+    ): File?
+}
+```
+
+**淘汰策略**：LRU（按最后修改时间排序，超出限制时删除最旧的）。
+
+---
+
+## 4. Skill 市场系统
+
+### 4.1 市场架构
+
+Skill 市场基于 **GitHub Issues** 构建，使用 `OperitSkillMarket` 仓库作为中心市场：
+
+```kotlin
+private val MARKET_DEFINITION = GitHubIssueMarketDefinition(
+    owner = "AAswordman",
+    repo = "OperitSkillMarket",
+    label = "skill-plugin",
+    pageSize = 50
+)
+```
+
+### 4.2 SkillMarketViewModel — 市场视图模型
+
+| 功能 | 说明 |
+|------|------|
+| `loadSkillMarketData()` | 加载市场列表（带排序、分页） |
+| `searchSkillMarketIssues(query)` | 搜索市场内容 |
+| `installSkill(item)` | 安装 Skill |
+| `publishSkill(...)` | 发布 Skill 到市场 |
+| `updatePublishedSkill(...)` | 更新已发布的 Skill |
+| `removeSkillFromMarket(issueNumber)` | 下架 Skill |
+| `loadUserPublishedSkills()` | 加载用户已发布的 Skill |
+
+### 4.3 发布格式
+
+发布的 Issue Body 包含嵌入式 JSON 元数据：
+
+```markdown
+<!-- operit-skill-json: {"description":"...","repositoryUrl":"...","version":"v1"} -->
+<!-- operit-parser-version: v1 -->
+
+## Skill 信息
+
+描述内容...
+
+## 仓库信息
+
+- 仓库地址: https://github.com/owner/repo
+
+## 安装方法
+
+1. 复制仓库地址
+2. 在 Operit 中粘贴安装
+3. 完成
+
+## 技术信息
+
+| 项目 | 内容 |
+|------|------|
+| 平台 | Operit AI |
+| 解析版本 | v1 |
+| 发布时间 | 2024-01-15 10:30:00 |
+```
+
+### 4.4 SkillIssueParser — Issue 解析器
+
+```kotlin
+object SkillIssueParser {
+    data class ParsedSkillInfo(
+        val title: String,
+        val description: String,
+        val repositoryUrl: String = "",
+        val category: String = "",
+        val tags: String = "",
+        val version: String = "",
+        val repositoryOwner: String = ""
+    )
+
+    fun parseSkillInfo(issue: GitHubIssue): ParsedSkillInfo
+}
+```
+
+---
+
+## 5. 使用指南
+
+### 5.1 创建本地 Skill
+
+**方式一：手动创建文件**
 
 ```bash
 mkdir -p /sdcard/Download/Operit/skills/my-skill
 cat > /sdcard/Download/Operit/skills/my-skill/SKILL.md << 'EOF'
 ---
-name: "My Skill"
-description: "A custom skill for specific tasks"
+name: "我的助手"
+description: "一个示例 Skill"
 ---
 
-# My Skill
+# 我的助手
 
-You are a helpful assistant specialized in...
+当用户询问天气时，调用 weather_search 工具获取实时天气数据。
 EOF
 ```
 
-### 3.3 技能删除
+**方式二：通过代码导入**
 
 ```kotlin
-// 删除技能（递归删除技能目录）
-val deleted = skillManager.deleteSkill("Python Expert")
-if (deleted) {
-    println("Skill deleted successfully")
-} else {
-    println("Failed to delete skill")
-}
+val result = skillRepository.importSkillFromDirectInput(
+    skillId = "weather-helper",
+    description = "天气查询助手",
+    content = """
+        # 天气查询助手
+        
+        当用户询问天气时：
+        1. 提取城市名称
+        2. 调用 weather_search(city) 工具
+        3. 以友好方式返回结果
+    """.trimIndent()
+)
 ```
 
-### 3.4 获取技能目录路径
+### 5.2 从 GitHub 安装 Skill
 
 ```kotlin
-// 获取技能根目录路径（用于 UI 展示）
-val path = skillManager.getSkillsDirectoryPath()
-// 返回: "/sdcard/Download/Operit/skills"
+// 完整仓库
+val result = skillRepository.importSkillFromGitHubRepo(
+    "https://github.com/username/my-skill-repo"
+)
+
+// 子目录
+val result = skillRepository.importSkillFromGitHubRepo(
+    "https://github.com/username/repo/tree/main/skills/weather"
+)
+
+// 原始文件
+val result = skillRepository.importSkillFromGitHubRepo(
+    "https://raw.githubusercontent.com/username/repo/main/skills/weather/SKILL.md"
+)
+```
+
+### 5.3 在 AI 对话中使用 Skill
+
+```kotlin
+// 1. 获取 Skill 系统提示词
+val systemPrompt = skillManager.getSkillSystemPrompt("code-reviewer")
+
+// 2. 拼接进 AI 请求
+val fullPrompt = """
+    $baseSystemPrompt
+    
+    $systemPrompt
+    
+    用户问题: $userQuery
+""".trimIndent()
+
+// 3. 发送给 AI
+aiService.sendMessage(fullPrompt)
+```
+
+### 5.4 控制 Skill 可见性
+
+```kotlin
+// 获取 AI 可见的 Skill 列表
+val visibleSkills = skillRepository.getAiVisibleSkillPackages()
+
+// 切换可见性
+skillVisibilityPreferences.setSkillVisibleToAi("code-reviewer", false)
+
+// 检查状态
+val isVisible = skillVisibilityPreferences.isSkillVisibleToAi("code-reviewer")
+```
+
+### 5.5 发布 Skill 到市场
+
+```kotlin
+viewModel.publishSkill(
+    title = "代码审查助手",
+    description = "自动审查代码变更，提供改进建议",
+    repositoryUrl = "https://github.com/username/code-reviewer-skill",
+    version = "v1"
+)
+```
+
+### 5.6 从市场安装 Skill
+
+```kotlin
+// 通过市场条目安装
+viewModel.installSkill(marketItem)
+
+// 通过 Issue 安装
+viewModel.installSkillFromIssue(githubIssue)
+
+// 直接通过仓库地址安装
+viewModel.installSkillFromRepoUrl("https://github.com/username/repo")
 ```
 
 ---
 
-## 四、SKILL.md 编写规范
+## 6. 安全设计
 
-### 4.1 基本结构
+### 6.1 ZIP 解压安全
+
+```kotlin
+private fun unzipToDirectory(zipFile: File, destinationDir: File) {
+    // 防止 Zip Slip 攻击
+    val outCanonical = outFile.canonicalFile
+    if (!outCanonical.path.startsWith(destCanonical.path + File.separator)) {
+        throw IllegalArgumentException("Zip entry is outside target dir")
+    }
+}
+```
+
+### 6.2 路径遍历防护
+
+```kotlin
+// GitHub 子目录导入时验证路径
+val resolvedCanonical = resolved.canonicalFile
+if (!resolvedCanonical.path.startsWith(baseCanonical.path + File.separator)) {
+    return context.getString(R.string.skill_error_import_invalid_path)
+}
+```
+
+### 6.3 Skill ID 校验
+
+```kotlin
+private val SKILL_ID_PATTERN = Regex("^[A-Za-z0-9._-]+$")
+
+private fun isValidSkillId(skillId: String): Boolean {
+    return SKILL_ID_PATTERN.matches(skillId) && skillId != "." && skillId != ".."
+}
+```
+
+---
+
+## 7. 模块关系图
+
+```
+skill 模块
+├── 核心层 (core.tools.skill)
+│   ├── SkillManager          # 本地 Skill 扫描、解析、系统提示词生成
+│   └── SkillPackage          # Skill 数据模型
+├── 数据层 (data.skill)
+│   ├── SkillRepository       # 导入/导出网关（ZIP、GitHub、直接输入）
+│   └── SkillVisibilityPreferences  # AI 可见性配置
+├── 工具层 (util)
+│   └── SkillRepoZipPoolManager     # GitHub ZIP 缓存池（LRU）
+└── UI 层 (ui.features.packages)
+    ├── SkillMarketViewModel  # 市场浏览、搜索、安装、发布
+    ├── SkillIssueParser      # GitHub Issue 元数据解析
+    └── SkillMarketBrowseItem # 市场列表项数据模型
+```
+
+---
+
+## 8. 最佳实践
+
+### 8.1 Skill 命名规范
+
+- Skill ID 仅允许 `A-Za-z0-9._-`
+- 名称应简洁明了，如 `code-reviewer`、`git-commit-helper`
+- 避免与内置工具重名
+
+### 8.2 Frontmatter 必填字段
 
 ```markdown
 ---
-name: "Skill Name"
-description: "Brief description of what this skill does"
+name: "skill-name"        # 唯一标识
+description: "描述"       # 一句话说明用途
 ---
-
-# Skill Name
-
-## Role
-
-You are a [role description]...
-
-## Capabilities
-
-- Capability 1
-- Capability 2
-- Capability 3
-
-## Workflow
-
-1. Step one
-2. Step two
-3. Step three
-
-## Constraints
-
-- Constraint 1
-- Constraint 2
-
-## Examples
-
-### Example 1
-
-Input: ...
-Output: ...
 ```
 
-### 4.2 元数据字段
-
-| 字段 | 必需 | 说明 |
-|------|------|------|
-| `name` | 是 | 技能名称，用于标识和调用 |
-| `description` | 否 | 技能描述，显示在技能列表中 |
-
-### 4.3 最佳实践
-
-1. **使用 Frontmatter**：推荐 YAML Frontmatter 格式，结构清晰
-2. **命名规范**：技能名称应简洁明了，避免特殊字符
-3. **目录组织**：相关文件放在技能目录下，便于打包分享
-4. **示例丰富**：提供具体的输入输出示例，帮助 AI 理解预期行为
-5. **约束明确**：明确说明技能的能力和限制边界
-
-### 4.4 示例 SKILL.md
-
-```markdown
----
-name: "Code Reviewer"
-description: "A skill for reviewing code and providing improvement suggestions"
----
-
-# Code Reviewer
-
-## Role
-
-You are an expert code reviewer with deep knowledge of software engineering best practices, design patterns, and code quality standards.
-
-## Capabilities
-
-- Review code for bugs, security issues, and performance problems
-- Suggest refactoring opportunities and design improvements
-- Check code style compliance and naming conventions
-- Identify potential edge cases and error handling gaps
-
-## Review Workflow
-
-1. **Understand Context**: Read the code and understand its purpose
-2. **Check Correctness**: Verify logic correctness and potential bugs
-3. **Evaluate Quality**: Assess code structure, readability, and maintainability
-4. **Security Scan**: Identify security vulnerabilities
-5. **Performance Check**: Point out performance bottlenecks
-6. **Provide Suggestions**: Give concrete improvement suggestions with code examples
-
-## Output Format
-
-For each issue found, provide:
-- **Severity**: Critical / Warning / Suggestion
-- **Location**: File and line number
-- **Description**: Clear explanation of the issue
-- **Suggestion**: Concrete code example showing the fix
-
-## Constraints
-
-- Focus on substantive issues, not trivial style preferences
-- Always provide constructive feedback with examples
-- Consider the trade-offs of each suggestion
-- Respect the existing codebase conventions
-```
-
----
-
-## 五、错误处理
-
-### 5.1 常见错误类型
-
-| 错误场景 | 错误信息 | 解决方案 |
-|---------|---------|---------|
-| 技能目录不存在 | `Cannot access skills directory: ...` | 创建 `Download/Operit/skills/` 目录 |
-| 缺少 SKILL.md | `Missing SKILL.md in ...` | 在技能目录中添加 SKILL.md 文件 |
-| 重复技能名 | `Duplicate skill name: ...` | 修改技能名称或合并技能 |
-| ZIP 导入失败 | `Failed to import skill: ...` | 检查 ZIP 文件完整性和格式 |
-| 路径遍历 | `Invalid path` | 确保子目录路径在 ZIP 内 |
-
-### 5.2 获取加载错误
-
-```kotlin
-val errors = skillManager.getSkillLoadErrors()
-errors.forEach { (name, error) ->
-    println("Failed to load skill '$name': $error")
-}
-```
-
----
-
-## 六、与 PackageManager 的集成
-
-Skill 模块与 PackageManager 紧密集成：
-
-```kotlin
-// 在 PackageManager.usePackage() 中
-fun usePackage(packageName: String): String {
-    // ...
-    
-    // 检查是否是 Skill
-    if (skillManager.getAvailableSkills().containsKey(normalizedPackageName) &&
-        !skillVisibilityPreferences.isSkillVisibleToAi(normalizedPackageName)
-    ) {
-        return "Skill '$normalizedPackageName' is set to not show to AI"
-    }
-    
-    val skillPrompt = skillManager.getSkillSystemPrompt(normalizedPackageName)
-    if (skillPrompt != null) {
-        return skillPrompt
-    }
-    
-    // ...
-}
-```
-
-**集成点**：
-- `usePackage()` 方法优先检查 Skill，然后检查传统包和 MCP 服务器
-- `SkillVisibilityPreferences` 控制 Skill 是否对 AI 可见
-- Skill 生成的系统提示词与包的系统提示词格式一致
-
----
-
-## 七、最佳实践
-
-### 7.1 技能开发建议
-
-1. **专注单一职责**：每个技能应聚焦一个专业领域
-2. **明确输入输出**：定义清晰的输入格式和预期输出
-3. **提供上下文**：在 SKILL.md 中提供足够的背景信息
-4. **使用示例驱动**：通过示例说明技能的使用方式
-5. **版本控制**：使用 Git 管理技能，便于追踪变更
-
-### 7.2 技能组织建议
+### 8.3 资源组织
 
 ```
-skills/
-├── coding/                          # 编程相关技能
-│   ├── python-expert/
-│   ├── java-reviewer/
-│   └── frontend-architect/
-├── writing/                         # 写作相关技能
-│   ├── technical-writer/
-│   └── copy-editor/
-└── analysis/                        # 分析相关技能
-    ├── data-analyst/
-    └── security-auditor/
+skill-name/
+├── SKILL.md              # 主文件（必须）
+├── assets/               # 图片、模板等静态资源
+│   └── example.png
+└── scripts/              # 辅助脚本（可选）
+    └── helper.sh
 ```
 
-### 7.3 性能考虑
+### 8.4 版本管理
 
-1. **文件大小**：SKILL.md 不宜过大（建议 < 100KB），避免提示词过长
-2. **目录深度**：保持扁平结构，避免过深的目录嵌套
-3. **刷新频率**：`getAvailableSkills()` 每次都会刷新，UI 层应适当缓存
+- 使用 Git 管理 Skill 仓库
+- 通过 GitHub Release 标记版本
+- 市场发布时填写 `version` 字段
 
-### 7.4 分享与分发
+### 8.5 性能优化
 
-1. **ZIP 打包**：将整个技能目录打包为 ZIP 便于分享
-2. **Git 仓库**：将技能放在 Git 仓库中，便于版本管理和协作
-3. **社区共享**：建立技能市场或仓库，促进技能共享
+- 大型 Skill 建议分块，避免单文件过大
+- 利用 `SkillRepoZipPoolManager` 缓存避免重复下载
+- 定期调用 `refreshAvailableSkills()` 同步本地状态
 
 ---
 
-## 八、总结
+## 9. 总结
 
-Skill 模块是 Operit AI 的轻量级能力扩展系统，通过简单的 Markdown 文件即可为 AI 注入专业能力。其设计特点包括：
+Skill 模块通过 **Markdown-First** 的设计哲学，将 AI 能力扩展的门槛降到最低。其核心优势包括：
 
-1. **极简设计**：仅 2 个文件（SkillManager + SkillPackage），无复杂依赖
-2. **零代码**：纯文本定义，无需编程知识即可创建技能
-3. **目录驱动**：基于文件系统的自然组织方式
-4. **提示词注入**：将 SKILL.md 内容直接注入 AI 系统提示词
-5. **与包系统无缝集成**：通过 `usePackage()` 统一调用
-
-通过本模块，非技术用户也能轻松创建和分享 AI 技能，极大地扩展了 Operit AI 的应用场景和专业能力。
+1. **零编译**：纯 Markdown + 文件系统，无需构建工具
+2. **即插即用**：扫描目录即可发现新 Skill，无需重启应用
+3. **社区驱动**：基于 GitHub Issues 的市场机制，天然支持协作和版本管理
+4. **安全可控**：ZIP 解压防护、路径遍历检查、细粒度可见性控制
+5. **生态兼容**：支持从任意 Git 仓库导入，与现有开发工作流无缝集成

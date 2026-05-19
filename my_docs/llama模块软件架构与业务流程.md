@@ -6,33 +6,33 @@
 
 ### 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| **llama.cpp 引擎** | 基于 ggerganov/llama.cpp 上游，支持 GGUF 格式模型 |
-| **JNI 桥接** | C++ 层实现 JNI 接口，连接 Kotlin 与 llama.cpp |
-| **流式生成** | 逐 token 流式输出，支持实时回调到 Java |
-| **Chat Template** | 支持模型内置的聊天模板（Jinja2），自动格式化对话 |
-| **结构化模板** | 支持 OpenAI 兼容格式的消息 + 工具定义 |
-| **采样参数** | temperature、top_p、top_k、重复惩罚等完整采样控制 |
-| **工具调用语法** | 支持 Grammar-based 工具调用约束（lazy/pattern/token 触发） |
-| **工具调用解析** | 自动解析模型输出的工具调用为 OpenAI 兼容格式 |
-| **GPU 卸载** | 支持将部分层卸载到 GPU 加速（需构建支持） |
-| **Flash Attention** | 支持 Flash Attention 优化内存和速度 |
-| **可中断生成** | 支持取消正在进行的生成任务 |
-| **上下文管理** | 自动截断超长 prompt 以适应上下文窗口 |
+| 特性                  | 说明                                             |
+| ------------------- | ---------------------------------------------- |
+| **llama.cpp 引擎**    | 基于 ggerganov/llama.cpp 上游，支持 GGUF 格式模型         |
+| **JNI 桥接**          | C++ 层实现 JNI 接口，连接 Kotlin 与 llama.cpp           |
+| **流式生成**            | 逐 token 流式输出，支持实时回调到 Java                      |
+| **Chat Template**   | 支持模型内置的聊天模板（Jinja2），自动格式化对话                    |
+| **结构化模板**           | 支持 OpenAI 兼容格式的消息 + 工具定义                       |
+| **采样参数**            | temperature、top\_p、top\_k、重复惩罚等完整采样控制          |
+| **工具调用语法**          | 支持 Grammar-based 工具调用约束（lazy/pattern/token 触发） |
+| **工具调用解析**          | 自动解析模型输出的工具调用为 OpenAI 兼容格式                     |
+| **GPU 卸载**          | 支持将部分层卸载到 GPU 加速（需构建支持）                        |
+| **Flash Attention** | 支持 Flash Attention 优化内存和速度                     |
+| **可中断生成**           | 支持取消正在进行的生成任务                                  |
+| **上下文管理**           | 自动截断超长 prompt 以适应上下文窗口                         |
 
 ### 技术栈
 
-| 技术 | 版本/标准 | 用途 |
-|------|----------|------|
-| llama.cpp | upstream C++ | 本地 LLM 推理引擎 |
-| C++ | C++17 | JNI 桥接层 |
-| CMake | 3.22.1+ | 原生库构建 |
-| Kotlin | JVM 17 | Runtime 封装层 |
-| NDK | arm64-v8a | Android 原生开发 |
-| nlohmann/json | header-only | JSON 解析（结构化模板） |
+| 技术            | 版本/标准        | 用途             |
+| ------------- | ------------ | -------------- |
+| llama.cpp     | upstream C++ | 本地 LLM 推理引擎    |
+| C++           | C++17        | JNI 桥接层        |
+| CMake         | 3.22.1+      | 原生库构建          |
+| Kotlin        | JVM 17       | Runtime 封装层    |
+| NDK           | arm64-v8a    | Android 原生开发   |
+| nlohmann/json | header-only  | JSON 解析（结构化模板） |
 
----
+***
 
 ## 二、整体架构设计思想
 
@@ -96,14 +96,14 @@
 
 ### 2.2 架构模式
 
-| 模式 | 应用位置 | 说明 |
-|------|----------|------|
-| **JNI 桥接模式** | C++ ↔ Kotlin | 通过 JNI 实现跨语言调用 |
-| **对象池/会话模式** | LlamaSession | 每个模型一个会话，独立管理生命周期 |
-| **回调模式** | GenerationCallback | C++ 逐 token 回调到 Java/Kotlin |
-| **RAII** | LlamaSessionNative | 构造函数加载模型，析构函数释放资源 |
-| **原子操作** | cancel 标志 | `std::atomic_bool` 实现线程安全的中断 |
-| **双重检查锁定** | LlamaLibraryLoader | 确保动态库只加载一次 |
+| 模式           | 应用位置               | 说明                           |
+| ------------ | ------------------ | ---------------------------- |
+| **JNI 桥接模式** | C++ ↔ Kotlin       | 通过 JNI 实现跨语言调用               |
+| **对象池/会话模式** | LlamaSession       | 每个模型一个会话，独立管理生命周期            |
+| **回调模式**     | GenerationCallback | C++ 逐 token 回调到 Java/Kotlin  |
+| **RAII**     | LlamaSessionNative | 构造函数加载模型，析构函数释放资源            |
+| **原子操作**     | cancel 标志          | `std::atomic_bool` 实现线程安全的中断 |
+| **双重检查锁定**   | LlamaLibraryLoader | 确保动态库只加载一次                   |
 
 ### 2.3 核心设计原则
 
@@ -114,7 +114,7 @@
 5. **优雅降级**：无 llama.cpp 子模块时编译为 stub 实现，返回不可用状态
 6. **上下文自适应**：超长 prompt 自动截断，保留生成空间
 
----
+***
 
 ## 三、源码目录结构
 
@@ -145,10 +145,11 @@ llama/
 ```
 
 **注意**：`third_party/llama.cpp/` 是 Git 子模块，需要在构建前初始化。CMake 支持两个查找路径：
+
 - 优先：`llama/third_party/llama.cpp/`
 - 回退：`llama/../third_party/llama.cpp/`（项目根目录）
 
----
+***
 
 ## 四、核心架构详解
 
@@ -371,23 +372,23 @@ class LlamaSession private constructor(
 
 ### 4.4 JNI 方法完整列表
 
-| Kotlin 方法 | C++ 函数 | 参数 | 返回值 | 说明 |
-|-------------|----------|------|--------|------|
-| `nativeIsAvailable()` | `Java_..._nativeIsAvailable` | — | Boolean | 原生库是否可用 |
-| `nativeGetUnavailableReason()` | `Java_..._nativeGetUnavailableReason` | — | String | 不可用原因 |
-| `nativeCreateSession(...)` | `Java_..._nativeCreateSession` | 模型路径 + 配置 | Long | 创建会话，返回指针 |
-| `nativeReleaseSession(ptr)` | `Java_..._nativeReleaseSession` | sessionPtr | — | 释放会话资源 |
-| `nativeCancel(ptr)` | `Java_..._nativeCancel` | sessionPtr | — | 设置取消标志 |
-| `nativeCountTokens(ptr, text)` | `Java_..._nativeCountTokens` | sessionPtr, text | Int | 计算文本 token 数 |
-| `nativeSetSamplingParams(...)` | `Java_..._nativeSetSamplingParams` | sessionPtr + 采样参数 | Boolean | 更新采样参数 |
-| `nativeApplyChatTemplate(...)` | `Java_..._nativeApplyChatTemplate` | sessionPtr, roles, contents, addAssistant | String? | 应用简单聊天模板 |
+| Kotlin 方法                                | C++ 函数                                       | 参数                                                | 返回值     | 说明           |
+| ---------------------------------------- | -------------------------------------------- | ------------------------------------------------- | ------- | ------------ |
+| `nativeIsAvailable()`                    | `Java_..._nativeIsAvailable`                 | —                                                 | Boolean | 原生库是否可用      |
+| `nativeGetUnavailableReason()`           | `Java_..._nativeGetUnavailableReason`        | —                                                 | String  | 不可用原因        |
+| `nativeCreateSession(...)`               | `Java_..._nativeCreateSession`               | 模型路径 + 配置                                         | Long    | 创建会话，返回指针    |
+| `nativeReleaseSession(ptr)`              | `Java_..._nativeReleaseSession`              | sessionPtr                                        | —       | 释放会话资源       |
+| `nativeCancel(ptr)`                      | `Java_..._nativeCancel`                      | sessionPtr                                        | —       | 设置取消标志       |
+| `nativeCountTokens(ptr, text)`           | `Java_..._nativeCountTokens`                 | sessionPtr, text                                  | Int     | 计算文本 token 数 |
+| `nativeSetSamplingParams(...)`           | `Java_..._nativeSetSamplingParams`           | sessionPtr + 采样参数                                 | Boolean | 更新采样参数       |
+| `nativeApplyChatTemplate(...)`           | `Java_..._nativeApplyChatTemplate`           | sessionPtr, roles, contents, addAssistant         | String? | 应用简单聊天模板     |
 | `nativeApplyStructuredChatTemplate(...)` | `Java_..._nativeApplyStructuredChatTemplate` | sessionPtr, messagesJson, toolsJson, addAssistant | String? | 应用结构化模板（含工具） |
-| `nativeGenerateStream(...)` | `Java_..._nativeGenerateStream` | sessionPtr, prompt, maxTokens, callback | Boolean | 流式生成文本 |
-| `nativeSetToolCallGrammar(...)` | `Java_..._nativeSetToolCallGrammar` | sessionPtr, grammar, triggerPatterns | Boolean | 设置工具调用语法 |
-| `nativeClearToolCallGrammar(ptr)` | `Java_..._nativeClearToolCallGrammar` | sessionPtr | Boolean | 清除工具调用语法 |
-| `nativeParseToolCallResponse(...)` | `Java_..._nativeParseToolCallResponse` | sessionPtr, content | String? | 解析工具调用响应 |
+| `nativeGenerateStream(...)`              | `Java_..._nativeGenerateStream`              | sessionPtr, prompt, maxTokens, callback           | Boolean | 流式生成文本       |
+| `nativeSetToolCallGrammar(...)`          | `Java_..._nativeSetToolCallGrammar`          | sessionPtr, grammar, triggerPatterns              | Boolean | 设置工具调用语法     |
+| `nativeClearToolCallGrammar(ptr)`        | `Java_..._nativeClearToolCallGrammar`        | sessionPtr                                        | Boolean | 清除工具调用语法     |
+| `nativeParseToolCallResponse(...)`       | `Java_..._nativeParseToolCallResponse`       | sessionPtr, content                               | String? | 解析工具调用响应     |
 
----
+***
 
 ## 五、核心业务流程
 
@@ -654,7 +655,7 @@ class LlamaSession private constructor(
             • catch ... → 恢复之前状态 → 日志记录 → 返回 null
 ```
 
----
+***
 
 ## 六、CMake 构建配置
 
@@ -711,12 +712,12 @@ target_link_options(LlamaWrapper PRIVATE "-Wl,-z,max-page-size=16384")
 
 **条件编译策略**：
 
-| 模式 | 条件 | 行为 |
-|------|------|------|
-| **完整模式** | `third_party/llama.cpp/` 存在 | 编译完整 JNI 实现，链接 llama + common |
-| **Stub 模式** | 子模块缺失 | 编译空实现，`nativeIsAvailable()` 返回 false |
+| 模式          | 条件                          | 行为                                   |
+| ----------- | --------------------------- | ------------------------------------ |
+| **完整模式**    | `third_party/llama.cpp/` 存在 | 编译完整 JNI 实现，链接 llama + common        |
+| **Stub 模式** | 子模块缺失                       | 编译空实现，`nativeIsAvailable()` 返回 false |
 
----
+***
 
 ## 七、Gradle 构建配置
 
@@ -773,7 +774,7 @@ kotlin {
 }
 ```
 
----
+***
 
 ## 八、完整架构图（Mermaid）
 
@@ -867,7 +868,7 @@ flowchart TB
     Engine --> FlashAttn
 ```
 
----
+***
 
 ## 九、快速上手路径
 
@@ -985,7 +986,7 @@ session.clearToolCallGrammar()
 session.cancel()  // 设置 cancel 标志，生成循环会安全退出
 ```
 
----
+***
 
 *文档生成时间: 2026-05-13*
 *基于 Operit AI llama 模块代码分析*
