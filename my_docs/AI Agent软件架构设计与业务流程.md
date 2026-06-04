@@ -1,4 +1,4 @@
-# Operit AI — AI Agent 软件架构设计与业务流程
+¬# Operit AI — AI Agent 软件架构设计与业务流程
 
 ## 一、AI Agent 系统定位
 
@@ -35,7 +35,7 @@ Operit AI 的 Agent 系统是一个**多模态、多工具、多轮推理的智�
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                    会话管理层 (Session Management)                     │   │
 │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │   │
-│  │  │ChatServiceCore│ │ChatRuntimeHolder│ │ChatRuntimeSlot│ │ 7 Delegates│   │   │
+│  │  │ChatServiceCore│ │ChatRuntimeHolder│ │ChatRuntimeSlot│ │ 6 Delegates│   │   │
 │  │  │(服务核心)    │ │(运行时持有者) │ │(MAIN/FLOATING)│ │(委托)      │   │   │
 │  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘   │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -81,26 +81,6 @@ Operit AI 的 Agent 系统是一个**多模态、多工具、多轮推理的智�
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### ChatServiceCore 7 Delegates 职责表
-
-| # | 委托类名 | 核心职责 |
-|---|---------|--------|
-| 1 | MessageProcessingDelegate | 消息流式处理、AI响应收集、中断处理 |
-| 2 | ChatHistoryDelegate | 聊天历史CRUD、会话切换 |
-| 3 | ApiConfigDelegate | API配置热更新、服务初始化 |
-| 4 | TokenStatisticsDelegate | Token计数统计、累计值管理 |
-| 5 | AttachmentDelegate | 附件处理、文件绑定 |
-| 6 | UiStateDelegate | UI状态管理、上下文限制提示 |
-| 7 | MessageCoordinationDelegate | 消息总结、群组编排、Token限制处理 |
-
-#### ChatRuntimeHolder 跨会话同步机制
-
-`ChatRuntimeHolder` 是一个全局单例，管理 MAIN 和 FLOATING 两个 `ChatRuntimeSlot`，每个 Slot 持有独立的 `ChatServiceCore` 实例。其核心同步机制：
-
-- **聊天选择同步**（`registerChatSelectionSync`）：MAIN → FLOATING 方向，当 MAIN 切换会话时自动同步到 FLOATING
-- **轮次完成同步**（`registerTurnSync`）：双向（MAIN ↔ FLOATING），当一端完成一轮对话后通过 `reloadChatMessagesSmart` + `setTokenCounts` 同步消息和Token统计到另一端
-- **活跃对话统计**：聚合两个 Slot 的 `activeStreamingChatIds` 和 `currentTurnToolInvocationCountByChatId`，对外暴露 `activeConversationCount` 和 `currentSessionToolCount` StateFlow
-
 ### 2.2 核心设计模式
 
 | 模式 | 应用位置 | 说明 |
@@ -109,7 +89,7 @@ Operit AI 的 Agent 系统是一个**多模态、多工具、多轮推理的智�
 | **中央编排器** | EnhancedAIService | 单一入口管理对话、工具、文件绑定等全部流程 |
 | **策略模式** | AIService / MultiServiceManager | 按功能类型路由到不同 AI 提供商 |
 | **钩子链** | PromptHookRegistry | 7 阶段钩子链，支持 ToolPkg 注入修改 |
-| **委托模式** | ChatServiceCore 7 Delegates | 将聊天业务拆分为独立委托 |
+| **委托模式** | ChatServiceCore 6 Delegates | 将聊天业务拆分为独立委托 |
 | **观察者模式** | AIToolHook / ToolProgressBus | 工具执行生命周期通知 |
 | **Agent 循环** | PhoneAgent | 截屏→AI分析→执行动作→截屏 循环 |
 | **自动激活** | AIToolHandler | 工具名含 `:` 时自动激活 Package/MCP |
@@ -131,10 +111,7 @@ Operit AI 的 Agent 系统是一个**多模态、多工具、多轮推理的智�
 ```kotlin
 class EnhancedAIService private constructor(private val context: Context) {
     companion object {
-        @Volatile private var INSTANCE: EnhancedAIService? = null        // 全局单例
-        private val CHAT_INSTANCES = ConcurrentHashMap<String, EnhancedAIService>()  // 聊天级单例
-
-        fun getInstance(context: Context): EnhancedAIService           // 全局单例获取
+        fun getInstance(context: Context): EnhancedAIService           // 全局单例
         fun getChatInstance(context: Context, chatId: String): EnhancedAIService  // 按聊天隔离
         fun releaseChatInstance(chatId: String)                        // 释放聊天实例
     }
@@ -143,16 +120,9 @@ class EnhancedAIService private constructor(private val context: Context) {
     private val multiServiceManager: MultiServiceManager         // 多模型路由
     private val conversationService: ConversationService         // 对话管理
     private val fileBindingService: FileBindingService           // 文件绑定
+    private val conversationRoundManager: ConversationRoundManager // 轮次管理
     private val toolHandler: AIToolHandler                       // 工具处理器
     private val packageManager: PackageManager                   // 包管理器
-
-    // 并发执行上下文
-    private val activeExecutionContexts: ConcurrentHashMap<Int, MessageExecutionContext>
-
-    // 状态流
-    private val _inputProcessingState: MutableStateFlow<InputProcessingState>
-    private val _perRequestTokenCounts: MutableStateFlow<Pair<Int, Int>?>
-    private val _requestWindowEstimate: MutableStateFlow<Int?>
 
     // 核心方法
     suspend fun sendMessage(options: SendMessageOptions): Stream<String>
@@ -161,57 +131,6 @@ class EnhancedAIService private constructor(private val context: Context) {
     suspend fun generateSummary(messages: List<Pair<String, String>>): String
     fun cancelConversation()
 }
-```
-
-#### MessageExecutionContext 数据类
-
-每次 `sendMessage` 调用创建独立的执行上下文，实现并发隔离：
-
-```kotlin
-private data class MessageExecutionContext(
-    val executionId: Int,
-    val streamBuffer: StringBuilder = StringBuilder(),
-    val roundManager: ConversationRoundManager = ConversationRoundManager(),
-    val isConversationActive: AtomicBoolean = AtomicBoolean(true),
-    val conversationHistory: MutableList<PromptTurn>,
-    val eventChannel: MutableSharedStream<TextStreamEvent>,
-)
-```
-
-#### SendMessageOptions 核心字段
-
-```kotlin
-data class SendMessageOptions(
-    var message: String = "",
-    var maxTokens: Int = 0,
-    var tokenUsageThreshold: Double = 0.0,
-    var chatId: String? = null,
-    var chatHistory: List<PromptTurn> = emptyList(),
-    var workspacePath: String? = null,
-    var workspaceEnv: String? = null,
-    var functionType: FunctionType = FunctionType.CHAT,
-    var promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT,
-    var enableThinking: Boolean = false,                        // 支持思考链模式
-    var stream: Boolean = true,                                 // 流式/批量响应选择
-    var enableMemoryAutoUpdate: Boolean = true,                 // 自动更新记忆库
-    var isSubTask: Boolean = false,                             // 子任务标志
-    var enableGroupOrchestrationHint: Boolean = false,          // 群组编排提示
-    var groupParticipantNamesText: String? = null,              // 群组参与者名称
-    var proxySenderName: String? = null,                        // 代理发送者名
-    var chatModelConfigIdOverride: String? = null,              // 模型配置ID覆盖
-    var chatModelIndexOverride: Int? = null,                    // 模型索引覆盖
-    var preferenceProfileIdOverride: String? = null,            // 偏好配置覆盖
-    var notifyReplyOverride: Boolean? = null,                   // 通知回复覆盖
-    var disableWarning: Boolean = false,                        // 禁用警告
-    var onNonFatalError: suspend (error: String) -> Unit = {},  // 非致命错误回调
-    var onTokenLimitExceeded: (suspend () -> Unit)? = null,     // Token限制回调
-    var customSystemPromptTemplate: String? = null,
-    var characterName: String? = null,
-    var avatarUri: String? = null,
-    var roleCardId: String? = null,
-    var callbacks: SendMessageCallbacks? = null,
-    var onToolInvocation: (suspend (String) -> Unit)? = null,
-)
 ```
 
 ### 3.2 sendMessage 核心流程
@@ -254,9 +173,6 @@ sendMessage(options)
     │
     ├──► 6. 发送到 AI 模型
     │       aiService.sendMessage(context, history, modelParameters)
-    │       • enableThinking — 支持思考链模式
-    │       • stream — 流式/批量响应选择
-    │       • onNonFatalError — 非致命错误回调
     │       • 返回 Stream<String>（流式响应）
     │
     ├──► 7. 流式收集响应
@@ -285,10 +201,8 @@ sendMessage(options)
     │       │       ├──► 权限检查（弹窗确认）
     │       │       ├──► 注入包调用上下文
     │       │       ├──► 并行/串行分组执行
-    │       │       │       • 并行工具（12个）：list_files, read_file, read_file_part,
-    │       │       │         read_file_full, file_exists, find_files, file_info,
-    │       │       │         grep_code, calculate, ffmpeg_info, visit_web, download_file
-    │       │       │       • 串行工具：write_file, execute_shell 等（有副作用的工具）
+    │       │       │       • 并行工具：list_files, read_file, grep_code 等
+    │       │       │       • 串行工具：write_file, execute_shell 等
     │       │       └──► 按原始顺序聚合结果
     │       │
     │       ├──► 格式化工具结果
@@ -534,7 +448,7 @@ flowchart TD
     Lookup4 --> ReturnExecutor
 ```
 
-**关键代码** — [AIToolHandler.kt](app/src/main/java/com/ai/assistance/operit/core/tools/AIToolHandler.kt)：
+**关键代码** — [AIToolHandler.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/core/tools/AIToolHandler.kt)：
 
 ```kotlin
 fun getToolExecutorOrActivate(toolName: String): ToolExecutor? {
@@ -971,8 +885,6 @@ flowchart TB
                 • 支持流式结果（中间结果 + 最终结果）
 ```
 
-**权限检查说明**：`AIToolHandler.executeTool()` 方法本身**不包含权限检查**，权限检查由 `ToolExecutionManager.executeInvocations()` 在调用工具前统一负责（见 5.3 节）。`executeTool()` 的步骤 4 通知 `onToolPermissionChecked` 仅为 Hook 回调通知，不是权限拦截逻辑。
-
 ### 5.2 四种工具扩展方式
 
 | 方式 | 格式 | 执行器 | 扩展能力 |
@@ -982,47 +894,10 @@ flowchart TB
 | **Package 工具** | `pkg:tool` | PackageToolExecutor | JS 脚本工具 |
 | **ToolPkg** | `pkg:tool` | PackageToolExecutor | JS + Compose DSL + 钩子 |
 
-#### MCPToolExecutor 功能细节
-
-```
-MCPToolExecutor.invoke(tool)
-    │
-    ├──► 1. 解析工具名称
-    │       • 格式: "server_name:tool_name"
-    │       • 提取 serverName 和 actualToolName
-    │
-    ├──► 2. 获取 MCP 客户端
-    │       • mcpManager.getOrCreateClient(serverName)
-    │       • 失败时返回详细连接错误原因
-    │
-    ├──► 3. 激活状态检查
-    │       • mcpClient.isActive()
-    │       • 未激活 → 提示使用 use_package 工具激活
-    │
-    ├──► 4. 参数自动类型转换
-    │       • getToolInfo() → 获取工具 inputSchema
-    │       • convertParameterTypes(parameters, toolInfo)
-    │       • 根据 schema 中的 type 定义自动转换
-    │         (string → number/boolean/array 等)
-    │       • 使用 MCPToolParameter.smartConvert() 智能转换
-    │
-    ├──► 5. 调用工具
-    │       • mcpClient.callToolSync(actualToolName, convertedParameters)
-    │
-    └──► 6. 结果处理
-            • extractContentFromResult() 解析 content 数组
-            • 支持 text/image/resource 三种内容类型
-            • JSON 智能格式化: isJsonString() → formatJson()
-            • 自动截断超长结果 (MAX_TEXT_RESULT_LENGTH)
-```
-
 ### 5.3 工具执行管理器 — ToolExecutionManager
 
 ```
 executeInvocations(invocations, ...)
-    │
-    ├──► 0. 确保默认工具注册
-    │       • toolHandler.registerDefaultTools() (幂等、线程安全)
     │
     ├──► 1. 工具暴露模式拦截
     │       • CLI 模式 → 只允许白名单工具
@@ -1031,10 +906,9 @@ executeInvocations(invocations, ...)
     ├──► 2. 角色卡工具权限拦截
     │       • 角色卡定义了 allowedTools → 只允许列表内工具
     │
-    ├──► 3. 权限检查 (checkToolPermission)
+    ├──► 3. 权限检查
     │       • 敏感工具（execute_shell, write_file 等）→ 弹窗确认
     │       • 非敏感工具 → 自动授权
-    │       • deny_tool 标记 → 跳过权限弹窗
     │
     ├──► 4. 注入包调用上下文
     │       • __operit_package_caller_name
@@ -1042,32 +916,16 @@ executeInvocations(invocations, ...)
     │       • __operit_package_chat_id
     │
     ├──► 5. 并行/串行分组
-    │       • 并行组：list_files, read_file, read_file_part, read_file_full,
-    │                 file_exists, find_files, file_info, grep_code,
-    │                 calculate, ffmpeg_info, visit_web, download_file
+    │       • 并行组：list_files, read_file, read_file_part, grep_code, grep_context,
+    │                 find_files, query_memory, get_memory_by_title, file_info, file_exists
     │       • 串行组：其他所有工具
     │
     ├──► 6. 执行
-    │       • 并行组 → coroutineScope { async { ... } } 并发执行
+    │       • 并行组 → coroutineScope { launch { ... } } 并发执行
     │       • 串行组 → 逐个执行
-    │       • 工具不存在 → buildToolNotAvailableErrorMessage() 智能错误提示
     │
     └──► 7. 按原始顺序聚合结果
 ```
-
-#### 智能错误提示机制 — buildToolNotAvailableErrorMessage
-
-当工具不存在时，`ToolExecutionManager` 会根据工具名格式生成针对性的错误提示：
-
-| 情况 | 判断条件 | 错误提示 | 示例 |
-|------|----------|----------|------|
-| 含 `.` 不含 `:` | `toolName.contains('.') && !toolName.contains(':')` | "请使用 packName:toolName 格式" | `weather.forecast` → 建议 `weather:forecast` |
-| 含 `:` 但包不存在 | 包名不在 available packages 中 | "The tool package or MCP server 'X' does not exist" | `unknown:tool` |
-| 含 `:` 包存在但工具是 advice-only | `packageTools.any { it.advice && it.name == toolName }` | "Tool 'X' is an advice-only entry" | `pkg:info_tool` |
-| 含 `:` 包已激活但工具名不存在 | 包已激活，工具名不匹配 | "Tool 'X' does not exist in tool package 'Y'" | `pkg:nonexistent` |
-| 含 `:` 包未激活 | 自动激活失败 | "Auto-activation was attempted but failed" | `pkg:tool` |
-| 直接用包名当工具名 | `packageManager.getAvailablePackages().containsKey(toolName)` | "'X' is a tool package, not a tool" | `weather` |
-| 其他不存在的工具 | 默认情况 | "Tool 'X' is unavailable or does not exist" | `nonexistent_tool` |
 
 ---
 
@@ -1138,70 +996,36 @@ executeInvocations(invocations, ...)
 ```
 AI 输出格式：
     do(action=Launch, app=com.example.app)
-    do(action=Tap, element=[500, 800])
+    do(action=Tap, x=500, y=800)
     do(action=Type, text=Hello World)
-    do(action=Swipe, start=[500, 800], end=[500, 400])
+    do(action=Swipe, startX=500, startY=800, endX=500, endY=400, duration=300)
     do(action=Back)
     do(action=Home)
-    do(action=Wait, duration=2)
-    do(action=Take_over, message=请用户手动操作)
+    do(action=Wait, duration=1000)
+    do(action=Take_over)
     finish(message=任务已完成)
 ```
-
-#### ActionHandler 完整操作列表
-
-| 操作 | 说明 | 关键实现 |
-|------|------|----------|
-| **Launch** | 启动应用 | 支持 Shower 虚拟屏启动（`ShowerController.ensureDisplay()` + `launchApp()`）；检查 Shizuku/ADB 权限；回退到 `start_app` 内置工具 |
-| **Tap** | 点击坐标 | 支持相对坐标（千分比）自动转换为绝对坐标；Shower 路径用 `ShowerController.tap()`，普通路径用 `ToolImplementations.tap()` |
-| **Type** | 输入文本 | Shower 路径：Ctrl+A 全选 → DEL 清空 → 剩余贴板方式粘贴；普通路径：`set_input_text` 工具 |
-| **Swipe** | 滑动操作 | 指定起点和终点坐标（相对坐标）；Shower 路径用 `ShowerController.swipe()` |
-| **Back** | 返回键 | 注入 KEYCODE_BACK；Shower 路径用 `ShowerController.key(agentId, KEYCODE_BACK)` |
-| **Home** | Home键 | 注入 KEYCODE_HOME；Shower 路径用 `ShowerController.key(agentId, KEYCODE_HOME)` |
-| **Wait** | 等待 | 指定等待秒数，使用 `delay()` 协程挂起 |
-| **Take_over** | 用户接管 | 暂停 Agent 执行，返回 `shouldFinish=true`，等待用户手动操作 |
 
 ### 6.3 Shower 虚拟屏集成
 
 ```
 PhoneAgent
     │
-    ├──► ShowerController (object 单例，管理多个 agentId)
+    ├──► ShowerController (全局单例)
     │       │
-    │       ├──► instances: ConcurrentHashMap<agentId, ClientShowerController>
+    │       ├──► instances: Map<agentId, ClientShowerController>
     │       │
-    │       ├──► ensureDisplay(agentId, context, width, height, dpi, bitrateKbps)
+    │       ├──► ensureDisplay(agentId, width, height, dpi, bitrate)
     │       │       • 创建虚拟显示屏
     │       │
-    │       ├──► getDisplayId(agentId) → Int?
-    │       │       • 获取虚拟屏 ID
+    │       ├──► tap/swipe/key(agentId, ...)
+    │       │       • 注入触摸/按键事件
     │       │
-    │       ├──► getVideoSize(agentId) → Pair<Int, Int>?
-    │       │       • 获取视频尺寸
-    │       │
-    │       ├──► launchApp(agentId, packageName) → Boolean
-    │       │       • 在虚拟屏上启动应用
-    │       │
-    │       ├──► tap(agentId, x, y) → Boolean
-    │       │       • 点击坐标
-    │       │
-    │       ├──► key(agentId, keyCode) → Boolean
-    │       │       • 按键事件
-    │       │
-    │       ├──► keyWithMeta(agentId, keyCode, metaState) → Boolean
-    │       │       • 带修饰键的按键（如 Ctrl+A）
-    │       │
-    │       ├──► swipe(agentId, startX, startY, endX, endY) → Boolean
-    │       │       • 滑动操作
-    │       │
-    │       ├──► requestScreenshot(agentId) → ByteArray?
-    │       │       • 请求截图（支持超时参数 timeoutMs）
-    │       │
-    │       ├──► prepareMainDisplay(agentId, context) → Boolean
-    │       │       • 准备主屏输入注入（displayId=0）
+    │       ├──► requestScreenshot(agentId)
+    │       │       • 截取当前帧
     │       │
     │       └──► shutdown(agentId)
-    │               • 销毁虚拟屏，移除 controller 实例
+    │               • 销毁虚拟屏
     │
     ├──► ShowerServerManager
     │       • 管理 shower-server.jar 生命周期
@@ -1212,24 +1036,73 @@ PhoneAgent
             • 接收广播通知服务就绪
 ```
 
-#### 多代理支持机制
+---
 
-```kotlin
-// PhoneAgent 中的多代理判断逻辑
-val requiresVirtualScreen: Boolean = agentId.isNotBlank() && agentId != "default"
-val isMainScreenAgent: Boolean = agentId.isBlank() || agentId == "default"
+## 七、Prompt 钩子系统
+
+### 7.1 七阶段钩子链
+
+```
+用户输入
+    │
+    ├──► Stage 1: PromptInputHook
+    │       • 修改用户原始输入
+    │       • ToolPkg 可注入预处理逻辑
+    │
+    ├──► Stage 2: PromptHistoryHook
+    │       • 修改对话历史
+    │       • ToolPkg 可添加/删除/修改历史消息
+    │
+    ├──► Stage 3: PromptEstimateHistoryHook
+    │       • 修改估算用的对话历史（Token 计数）
+    │
+    ├──► Stage 4: SystemPromptComposeHook
+    │       • 修改系统提示词
+    │       • ToolPkg 可注入自定义指令
+    │
+    ├──► Stage 5: ToolPromptComposeHook
+    │       • 修改工具提示词
+    │       • ToolPkg 可添加/隐藏/修改工具描述
+    │
+    ├──► Stage 6: PromptFinalizeHook
+    │       • 最终修改完整 Prompt（发送前）
+    │       • ToolPkg 可做最终调整
+    │
+    └──► Stage 7: PromptEstimateFinalizeHook
+            • 最终修改估算用 Prompt（Token 计数）
 ```
 
-- **默认代理**（agentId 为空或 `"default"`）：操作主屏幕，可选通过 Shower 获取主屏截图和输入注入（`prepareMainDisplay()`）
-- **非默认代理**：需要虚拟屏支持，通过 `ShowerController.ensureDisplay()` 创建独立显示，通过 `VirtualDisplayOverlay` 显示虚拟屏画面
-- **会话清理**：非默认代理在任务结束时自动清理（`cleanupOnFinish = (agentId != "default")`）
-- **并发支持**：`ShowerController` 使用 `ConcurrentHashMap<agentId, ClientShowerController>` 维护多个实例，支持多个 Agent 同时操作不同虚拟屏
+### 7.2 ToolPkg 钩子桥接
+
+```
+ToolPkg JS 脚本
+    │
+    ├──► registerToolPkgPromptHook({ event: "toolpkg_system_prompt_compose", ... })
+    │
+    ├──► ToolPkgPromptHookBridge (Kotlin)
+    │       • 将 JS 钩子注册转换为 PromptHookRegistry 钩子
+    │       • 7 个桥接对象对应 7 个阶段
+    │
+    └──► PromptHookRegistry (Kotlin)
+            • 分发钩子事件
+            • 应用钩子修改
+```
+
+### 7.3 其他钩子系统
+
+| 钩子系统 | 触发时机 | 用途 |
+|----------|----------|------|
+| **AIToolHook** | 工具执行生命周期 | 通知 UI 更新、日志记录 |
+| **AppLifecycleHook** | 应用生命周期事件 | ToolPkg 响应前后台切换 |
+| **ToolLifecycleHook** | 工具执行前后 | ToolPkg 拦截/修改工具行为 |
+| **XmlRenderHook** | XML 标签渲染 | ToolPkg 自定义消息渲染 |
+| **MessageProcessingHook** | 消息处理 | ToolPkg 修改消息内容 |
 
 ---
 
-## 七、文件绑定系统
+## 八、文件绑定系统
 
-### 7.1 设计思想
+### 8.1 设计思想
 
 AI 生成代码后，不是直接覆盖文件，而是通过**结构化编辑指令**进行增量修改：
 
@@ -1239,7 +1112,7 @@ AI 生成代码后，不是直接覆盖文件，而是通过**结构化编辑指
 4. 执行替换或删除操作
 5. 生成 unified diff 供用户确认
 
-### 7.2 核心算法
+### 8.2 核心算法
 
 ```
 processFileBinding(originalContent, aiGeneratedCode)
@@ -1272,9 +1145,9 @@ processFileBinding(originalContent, aiGeneratedCode)
 
 ---
 
-## 八、记忆系统设计
+## 九、记忆系统设计
 
-### 8.1 系统架构总览
+### 9.1 系统架构总览
 
 Operit 的记忆系统是一个基于**知识图谱**的长期记忆管理架构，支持多路混合搜索、自动知识提取和语义向量索引：
 
@@ -1305,9 +1178,9 @@ Operit 的记忆系统是一个基于**知识图谱**的长期记忆管理架构
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 数据模型
+### 9.2 数据模型
 
-#### 8.2.1 核心实体关系
+#### 9.2.1 核心实体关系
 
 ```mermaid
 erDiagram
@@ -1363,7 +1236,7 @@ erDiagram
     }
 ```
 
-#### 8.2.2 Memory 实体
+#### 9.2.2 Memory 实体
 
 ```kotlin
 @Entity
@@ -1393,7 +1266,7 @@ data class Memory(
 - `backlinks: ToMany<MemoryLink>` — 入边关联（反向链接）
 - `documentChunks: ToMany<DocumentChunk>` — 文档分块
 
-#### 8.2.3 关联与标签
+#### 9.2.3 关联与标签
 
 **MemoryLink** — 定义记忆间关系：
 ```kotlin
@@ -1418,9 +1291,9 @@ data class MemoryTag(
 }
 ```
 
-### 8.3 存储层设计
+### 9.3 存储层设计
 
-#### 8.3.1 ObjectBox 数据库
+#### 9.3.1 ObjectBox 数据库
 
 记忆系统使用 **ObjectBox**（非 Room）作为数据库，按 `profileId` 隔离存储：
 
@@ -1439,9 +1312,9 @@ object ObjectBoxManager {
 }
 ```
 
-#### 8.3.2 MemoryRepository
+#### 9.3.2 MemoryRepository
 
-[MemoryRepository.kt](app/src/main/java/com/ai/assistance/operit/data/repository/MemoryRepository.kt) 是记忆系统的核心存储层（约 2814 行），提供完整的 CRUD + 搜索 + 向量索引能力：
+[MemoryRepository.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/data/repository/MemoryRepository.kt) 是记忆系统的核心存储层（约 2814 行），提供完整的 CRUD + 搜索 + 向量索引能力：
 
 ```
 MemoryRepository
@@ -1476,7 +1349,7 @@ MemoryRepository
                     • SKIP / UPDATE / CREATE_NEW 三种策略
 ```
 
-### 8.4 混合搜索算法
+### 9.4 混合搜索算法
 
 记忆搜索采用**多路召回 + RRF 融合**的混合搜索策略：
 
@@ -1513,49 +1386,11 @@ MemoryScoreMode.KEYWORD_FIRST  -> (keyword=1.3x, semantic=0.8x, edge=0.9x)
 MemoryScoreMode.SEMANTIC_FIRST -> (keyword=0.8x, semantic=1.3x, edge=1.1x)
 ```
 
-#### 评分常数
-
-```kotlin
-// MemoryRepository.companion
-private const val SEARCH_RRF_K = 60.0                    // RRF 融合的 K 值
-private const val SEARCH_KEYWORD_COVERAGE_BONUS = 0.6    // 关键词覆盖奖励系数
-private const val SEARCH_RELEVANCE_THRESHOLD = 0.025     // 相关性阈值过滤
-```
-
-- **RRF 融合公式**：`score = 1 / (SEARCH_RRF_K + rank) × importance × weight`
-- **关键词覆盖奖励**：当匹配的关键词覆盖超过某个比例时，额外加分 `SEARCH_KEYWORD_COVERAGE_BONUS`
-- **阈值过滤**：最终得分低于 `SEARCH_RELEVANCE_THRESHOLD` 的记忆会被过滤
-
-#### Jieba 中文分词集成
-
-关键词搜索使用 Jieba 分词进行关键词扩展，提升中文语义级别的匹配召回率：
-
-```
-splitSearchKeywords("手机内存不足") → ["手机内存不足"]
-    │
-    └──► expandKeywordToken("手机内存不足")
-            │
-            ├── 保留原词: "手机内存不足"
-            │
-            ├── TextSegmenter.segment("手机内存不足")
-            │       → ["手机", "内存", "不足"]
-            │
-            └── 最终扩展结果: {"手机内存不足", "手机", "内存", "不足"}
-```
-
-- `expandKeywordToken()` 方法对每个搜索关键词进行分词处理
-- `TextSegmenter.segment()` 提供 Jieba 中文分词能力
-- 支持中文语义级别的关键词匹配，解决长中文短语与标题之间的召回问题
-
 #### 向量索引
 
 - 使用 **HNSW** (Hierarchical Navigable Small World) 算法
-- **按维度分索引文件存储**：
-  - 记忆索引文件命名格式：`memory_hnsw_{profileId}_{dimension}.idx`
-  - 文档区块索引命名格式：`doc_index_{profileId}_{memoryId}_{dimension}.hnsw`
-  - 不同嵌入模型产生不同维度的向量，系统自动选择匹配维度的索引文件
-  - `memoryIndexFileForDimension(dimension)` 根据维度定位索引文件
-  - `parseMemoryIndexDimension(file)` 从文件名解析维度信息
+- 按维度分索引文件：`memory_hnsw_{profileId}_{dimension}.idx`
+- 文档区块索引：`doc_index_{profileId}_{memoryId}_{dimension}.hnsw`
 - 增量更新时采用**重建策略**而非增量添加
 
 #### Embedding 生成
@@ -1565,28 +1400,9 @@ splitSearchKeywords("手机内存不足") → ["手机内存不足"]
 - 文档分块独立生成 embedding
 - 支持批量重建
 
-#### 悬挂链接清理机制
+### 9.5 AI 工具接口
 
-系统定期清理悬挂的记忆链接（引用已删除记忆的链接）：
-
-```
-cleanupDanglingLinksIfNeeded(force: Boolean)
-    │
-    ├──► 间隔检查: DANGLING_LINK_CLEANUP_INTERVAL_MS = 30,000ms (30秒)
-    │       • 非强制模式下，距上次清理不足 30秒则跳过
-    │
-    ├──► collectLinkIdsForDeletion(emptySet(), includeDangling=true)
-    │       • 遍历所有 MemoryLink
-    │       • 检查 source/target 的引用 ID 是否有效
-    │       • sourceId ≤ 0 或 targetId ≤ 0 → 悬挂链接
-    │       • sourceId/targetId 不在现有记忆 ID 集合中 → 悬挂链接
-    │
-    └──► 批量删除: linkBox.removeByIds(danglingLinkIds)
-```
-
-### 8.5 AI 工具接口
-
-#### 8.5.1 工具列表
+#### 9.5.1 工具列表
 
 AI 可通过以下 11 个工具操作记忆库：
 
@@ -1604,22 +1420,22 @@ AI 可通过以下 11 个工具操作记忆库：
 | `delete_memory_link` | 删除关联 | source, target, type |
 | `update_user_preferences` | 更新用户偏好 | key-value pairs |
 
-#### 8.5.2 Snapshot 去重机制
+#### 9.5.2 Snapshot 去重机制
 
 `query_memory` 支持 `snapshot_id` 参数，跨多次查询排除已返回的记忆，避免 AI 在同一轮对话中重复获取相同记忆。
 
-#### 8.5.3 工具提示词分层
+#### 9.5.3 工具提示词分层
 
 | 分类 | 工具 | 可见性 |
 |------|------|--------|
 | **基础记忆工具** | query_memory, get_memory_by_title | 始终可见（公开分类） |
 | **扩展记忆工具** | create/update/delete/link 等 | 内部工具分类 |
 
-### 8.6 自动知识提取
+### 9.6 自动知识提取
 
-#### 8.6.1 MemoryLibrary — 核心智能层
+#### 9.6.1 MemoryLibrary — 核心智能层
 
-[MemoryLibrary.kt](app/src/main/java/com/ai/assistance/operit/api/chat/library/MemoryLibrary.kt) 负责从对话中自动提取知识图谱：
+[MemoryLibrary.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/api/chat/library/MemoryLibrary.kt) 负责从对话中自动提取知识图谱：
 
 ```
 saveMemory() 核心流程
@@ -1649,7 +1465,7 @@ saveMemory() 核心流程
     └──► 8. 创建记忆间的关联（links）
 ```
 
-#### 8.6.2 AI 分析返回的 JSON 结构
+#### 9.6.2 AI 分析返回的 JSON 结构
 
 ```json
 {
@@ -1662,7 +1478,7 @@ saveMemory() 核心流程
 }
 ```
 
-#### 8.6.3 自动分类
+#### 9.6.3 自动分类
 
 `autoCategorizeMemories()` 方法：
 - 查找所有未分类记忆（folderPath 为空）
@@ -1670,9 +1486,9 @@ saveMemory() 核心流程
 - AI 返回 JSON 数组 `[{"title": "...", "folder": "..."}]`
 - 更新记忆的 folderPath 并重新生成 embedding
 
-### 8.7 自动保存调度
+### 9.7 自动保存调度
 
-#### 8.7.1 触发机制
+#### 9.7.1 触发机制
 
 ```
 AI 回复完成
@@ -1683,7 +1499,7 @@ if (enableMemoryAutoUpdate && !isSubTask && content.isNotBlank())
     MemoryAutoSaveCandidateRepository.enqueue(chatId, timestamp)
 ```
 
-#### 8.7.2 MemoryAutoSaveScheduler
+#### 9.7.2 MemoryAutoSaveScheduler
 
 ```mermaid
 flowchart TD
@@ -1706,7 +1522,7 @@ flowchart TD
 
 **配置**：自动保存间隔默认 15 分钟，范围 1-180 分钟。
 
-### 8.8 记忆与对话的集成
+### 9.8 记忆与对话的集成
 
 记忆通过**附件机制**注入到对话中：
 
@@ -1742,7 +1558,7 @@ buildMemoryContextXml() → 生成 <memory_context> XML 附件
 附件注入对话 → AI 读取后使用 query_memory 工具主动搜索记忆
 ```
 
-### 8.9 完整记忆系统流程图
+### 9.9 完整记忆系统流程图
 
 ```mermaid
 sequenceDiagram
@@ -1786,11 +1602,11 @@ sequenceDiagram
 
 ---
 
-## 九、对话系统设计
+## 十、对话系统设计
 
-### 9.1 系统架构总览
+### 10.1 系统架构总览
 
-Operit 的对话系统采用**分层委托架构**，将复杂的聊天业务拆分为 7 个独立 Delegate，由 ChatServiceCore 统一协调：
+Operit 的对话系统采用**分层委托架构**，将复杂的聊天业务拆分为 6 个独立 Delegate，由 ChatServiceCore 统一协调：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1798,7 +1614,7 @@ Operit 的对话系统采用**分层委托架构**，将复杂的聊天业务拆
 │  ChatViewModel / AIChatScreen / FloatingChatService                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                          服务协调层                                          │
-│  ChatServiceCore (组合 7 Delegates + EnhancedAIService)                      │
+│  ChatServiceCore (组合 6 Delegates + EnhancedAIService)                      │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────────────┐    │
 │  │UiStateDelegate│ │ApiConfigDel  │ │TokenStatisticsDelegate           │    │
 │  │(UI 状态)      │ │(API 配置)    │ │(Token 统计)                      │    │
@@ -1828,9 +1644,9 @@ Operit 的对话系统采用**分层委托架构**，将复杂的聊天业务拆
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.2 数据模型
+### 10.2 数据模型
 
-#### 9.2.1 核心实体关系
+#### 10.2.1 核心实体关系
 
 ```mermaid
 erDiagram
@@ -1872,7 +1688,7 @@ erDiagram
     }
 ```
 
-#### 9.2.2 ChatMessage — 核心消息实体
+#### 10.2.2 ChatMessage — 核心消息实体
 
 ```kotlin
 @Serializable
@@ -1897,7 +1713,7 @@ data class ChatMessage(
 )
 ```
 
-#### 9.2.3 PromptTurn — 对话轮次抽象
+#### 10.2.3 PromptTurn — 对话轮次抽象
 
 ```kotlin
 enum class PromptTurnKind {
@@ -1916,7 +1732,7 @@ data class PromptTurn(
 - `mergeAdjacentTurns()` — 合并相邻同类型轮次（排除 SYSTEM/TOOL_CALL/TOOL_RESULT）
 - `appendUserTurnIfMissing()` — 确保末尾有用户轮次
 
-### 9.3 六 Delegate 架构
+### 10.3 六 Delegate 架构
 
 | Delegate | 职责 | 核心方法 |
 |----------|------|----------|
@@ -1928,11 +1744,11 @@ data class PromptTurn(
 | **MessageProcessingDelegate** | 消息处理 | 消息发送/接收、流式收集、工具调用循环、重新生成变体 |
 | **MessageCoordinationDelegate** | 消息协调 | 总结触发/取消、Token 超限处理、自动续聊、群组编排 |
 
-### 9.4 对话历史管理
+### 10.4 对话历史管理
 
-#### 9.4.1 ConversationService — 历史准备
+#### 10.4.1 ConversationService — 历史准备
 
-[ConversationService.kt](app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ConversationService.kt) 将 ChatMessage 列表转换为 PromptTurn 列表：
+[ConversationService.kt](file:///Users/liangyingjie/Documents/my_agent_projects/Operit/app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ConversationService.kt) 将 ChatMessage 列表转换为 PromptTurn 列表：
 
 ```
 prepareConversationHistory()
@@ -1953,7 +1769,7 @@ prepareConversationHistory()
     └──► 4. 返回 List<PromptTurn>
 ```
 
-#### 9.4.2 XML 标签处理
+#### 10.4.2 XML 标签处理
 
 ChatMarkupRegex 定义了对话中的 XML 标签正则：
 
@@ -1966,7 +1782,7 @@ ChatMarkupRegex 定义了对话中的 XML 标签正则：
 
 **随机标签名**：`generateRandomToolTagName()` 生成随机后缀（如 `tool_Ab3x`），避免模型输出固定格式，`normalizeToolLikeTagName()` 将其归一化。
 
-#### 9.4.3 角色隔离模式
+#### 10.4.3 角色隔离模式
 
 在群组编排中，不同角色的消息需要隔离：
 
@@ -1980,17 +1796,76 @@ ChatMarkupRegex 定义了对话中的 XML 标签正则：
   用户消息 → 添加 [From user] 前缀
 ```
 
-### 9.5 上下文窗口管理
+### 10.5 上下文窗口管理
 
-> 上下文管理系统的完整设计详见 **十一、上下文管理系统设计**。
+#### 10.5.1 Token 计数
 
-### 9.6 系统提示词动态构建
+**TokenCacheManager** 利用公共前缀缓存优化重复计算：
 
-> 提示词系统的完整设计详见 **十、提示词系统设计**。
+```
+calculateInputTokens(chatHistory, toolsJson)
+    │
+    ├──► 1. 将 toolsJson 拼接到 System Prompt 前面
+    ├──► 2. 找到与之前历史的公共前缀长度
+    ├──► 3. 缓存部分直接复用，新增部分重新计算
+    └──► 4. 使用 ChatUtils.estimateTokenCount() 估算
+```
 
-### 9.7 角色卡系统
+**MNN 本地模型**使用二分查找精确裁剪历史到 token 预算内。
 
-#### 9.7.1 CharacterCard 数据模型
+#### 10.5.2 历史截断策略
+
+截断通过**总结机制**实现，而非简单截断：
+
+```mermaid
+flowchart TD
+    Send[发送消息] --> Check{Token 超限?}
+    Check -->|否| Normal[正常发送]
+    Check -->|是| Summary[异步生成对话总结]
+    Summary --> Insert[插入总结到历史]
+    Insert --> Trim[截断旧消息]
+    Trim --> RaiseThreshold[提高阈值 0.5<br/>避免立即再次触发]
+    RaiseThreshold --> Send2[发送消息]
+```
+
+### 10.6 系统提示词动态构建
+
+#### 10.6.1 SystemPromptConfig 模板结构
+
+```
+系统提示词模板：
+    BEGIN_SELF_INTRODUCTION_SECTION     ← 自我介绍（可自定义）
+    WORKSPACE_GUIDELINES_SECTION        ← 工作区指引
+    TOOL_USAGE_GUIDELINES_SECTION       ← 工具使用说明
+    PACKAGE_SYSTEM_GUIDELINES_SECTION   ← 包系统指引
+    ACTIVE_PACKAGES_SECTION             ← 激活的工具包
+    AVAILABLE_TOOLS_SECTION             ← 可用工具列表
+```
+
+#### 10.6.2 动态构建流程
+
+```
+getSystemPromptWithCustomPrompts()
+    │
+    ├──► 1. dispatchSystemPromptComposeHooks(before_compose)
+    │
+    ├──► 2. getSystemPrompt() — 根据参数动态填充
+    │       ├── 根据语言选择中/英文模板
+    │       ├── 根据自定义模板覆盖
+    │       ├── 读取工作区规则文件
+    │       ├── 根据工具模式（CLI/ToolCall API/默认）调整格式
+    │       └── 根据视觉/音频/视频能力调整
+    │
+    ├──► 3. applyCustomPrompts() — 替换自我介绍 Section
+    │
+    ├──► 4. buildGroupOrchestrationHint() — 群组编排提示
+    │
+    └──► 5. dispatchSystemPromptComposeHooks(compose/after_compose)
+```
+
+### 10.7 角色卡系统
+
+#### 10.7.1 CharacterCard 数据模型
 
 ```kotlin
 @Entity(tableName = "character_cards")
@@ -2008,7 +1883,7 @@ data class CharacterCard(
 )
 ```
 
-#### 9.7.2 角色卡与对话的集成
+#### 10.7.2 角色卡与对话的集成
 
 ```mermaid
 flowchart TD
@@ -2034,7 +1909,7 @@ flowchart TD
     BuildPrompt --> Send[发送到 AI]
 ```
 
-#### 9.7.3 群组编排
+#### 10.7.3 群组编排
 
 ```
 群组编排流程：
@@ -2050,9 +1925,9 @@ flowchart TD
     └──► 3. 所有成员完成 → 返回最终结果
 ```
 
-### 9.8 对话轮次管理
+### 10.8 对话轮次管理
 
-#### 9.8.1 执行上下文隔离
+#### 10.8.1 执行上下文隔离
 
 每个 `sendMessage` 调用创建独立的 `MessageExecutionContext`：
 
@@ -2067,7 +1942,7 @@ private data class MessageExecutionContext(
 )
 ```
 
-#### 9.8.2 ConversationRoundManager
+#### 10.8.2 ConversationRoundManager
 
 ```kotlin
 class ConversationRoundManager {
@@ -2082,7 +1957,7 @@ class ConversationRoundManager {
 }
 ```
 
-#### 9.8.3 轮次切换
+#### 10.8.3 轮次切换
 
 ```
 AI 响应流收集完成
@@ -2100,9 +1975,9 @@ roundManager.startNewRound() — 开始新轮次
 收集新响应 — 循环直到无工具调用
 ```
 
-### 9.9 流式处理
+### 10.9 流式处理
 
-#### 9.9.1 流式响应处理
+#### 10.9.1 流式响应处理
 
 ```mermaid
 sequenceDiagram
@@ -2135,7 +2010,7 @@ sequenceDiagram
     end
 ```
 
-#### 9.9.2 Tool Call API 转换
+#### 10.9.2 Tool Call API 转换
 
 不同 AI Provider 的工具调用格式统一转换为 XML 标签：
 
@@ -2145,11 +2020,11 @@ sequenceDiagram
 | Claude | `content_block_start/delta/stop` | `<tool name="..."><param>...</param></tool>` |
 | 本地模型 | 文本中的 XML 标签 | 直接使用 |
 
-#### 9.9.3 修订追踪
+#### 10.9.3 修订追踪
 
 `TextStreamRevisionTracker` 支持流式输出中的修订（SAVEPOINT/ROLLBACK），用于工具调用时回滚已输出但不完整的内容。
 
-### 9.10 取消与中断机制
+### 10.10 取消与中断机制
 
 取消操作采用**分层传播**策略：
 
@@ -2177,7 +2052,7 @@ flowchart TD
     CancelEAS --> CancelTools[cancelAllToolExecutions]
 ```
 
-### 9.11 完整对话流程图
+### 10.11 完整对话流程图
 
 ```mermaid
 sequenceDiagram
@@ -2235,1790 +2110,7 @@ sequenceDiagram
 
 ---
 
-## 十、提示词系统设计
-
-### 10.1 系统架构总览
-
-Operit 的提示词系统采用**四层分层架构**，从顶层模板到底层钩子注入，形成完整的动态提示词工程体系：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Layer 1: 系统提示词 (SystemPromptConfig)                    │
-│    模板 + Section 占位符替换 + 角色卡自定义 + 群组编排                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                    Layer 2: 工具提示词 (SystemToolPrompts)                     │
-│    结构化工具定义 + 动态参数暴露 + 可见性过滤 + SAF书签注入                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                    Layer 3: 功能提示词 (FunctionalPrompts)                     │
-│    UI控制器 / 知识图谱提取 / 对话摘要 / 角色卡生成 / 翻译等                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                    Layer 4: 钩子注入 (PromptHookRegistry + Bridge)             │
-│    7阶段钩子管道 + ToolPkg JS桥接 + CLI模式适配                                │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 10.2 系统提示词动态构建
-
-#### 10.2.1 Section 占位符模板
-
-系统提示词采用 **Section 占位符模板** 方式构建，模板定义了 6 个可替换区域：
-
-```
-系统提示词模板：
-    BEGIN_SELF_INTRODUCTION_SECTION     ← 自我介绍（可自定义，角色卡注入点）
-    WORKSPACE_GUIDELINES_SECTION        ← 工作区指引（读取 .operitrules 等规则文件）
-    TOOL_USAGE_GUIDELINES_SECTION       ← 工具使用说明（XML格式 / ToolCall格式 / CLI格式）
-    PACKAGE_SYSTEM_GUIDELINES_SECTION   ← 包系统指引（完整版 / ToolCall版 / 空）
-    ACTIVE_PACKAGES_SECTION             ← 激活的工具包（动态构建包列表）
-    AVAILABLE_TOOLS_SECTION             ← 可用工具列表（完整描述 / 空）
-```
-
-#### 10.2.2 三种模式分支
-
-根据 `toolExposureMode` 和 `useToolCallApi`，Section 替换分为三种模式：
-
-| Section | FULL 模式 | Tool Call API 模式 | CLI 模式 |
-|---------|----------|-------------------|---------|
-| `TOOL_USAGE_GUIDELINES` | XML 格式工具调用说明 | 空（工具通过 API 字段发送） | CLI search+proxy 说明 |
-| `PACKAGE_SYSTEM_GUIDELINES` | 完整包系统说明 | ToolCall 版本（无 XML 格式） | 空 |
-| `ACTIVE_PACKAGES` | 动态构建包列表 | 动态构建包列表 | 空 |
-| `AVAILABLE_TOOLS` | 完整工具描述列表 | 空（通过 API tools 字段发送） | 空 |
-
-**模式自动选择逻辑**：
-
-```kotlin
-enum class ToolExposureMode {
-    FULL,   // 云端 API（OpenAI, Claude 等）
-    CLI;    // 本地推理（Ollama, LMStudio, MNN, llama.cpp 等）
-
-    companion object {
-        fun resolve(providerType: ApiProviderType): ToolExposureMode {
-            return when (providerType) {
-                LMSTUDIO, OLLAMA, OPENAI_LOCAL, MNN, LLAMA_CPP -> CLI
-                else -> FULL
-            }
-        }
-    }
-}
-```
-
-#### 10.2.3 完整动态构建流程
-
-```
-getSystemPromptWithCustomPrompts()
-    │
-    ├──► 1. dispatchSystemPromptComposeHooks(before_compose)
-    │       钩子可完全覆盖 systemPrompt
-    │
-    ├──► 2. getSystemPrompt() — 基础模板 + Section 替换
-    │       ├── 根据语言选择中/英文模板
-    │       ├── 读取工作区规则文件 → WORKSPACE_GUIDELINES_SECTION
-    │       ├── 动态构建包列表 → ACTIVE_PACKAGES_SECTION
-    │       ├── 根据模式替换 TOOL_USAGE / PACKAGE / TOOLS
-    │       └── 根据视觉/音频/视频能力调整
-    │
-    ├──► 3. applyCustomPrompts() — 角色卡自定义提示词
-    │       将 customIntroPrompt 替换 BEGIN_SELF_INTRODUCTION_SECTION
-    │
-    ├──► 4. buildGroupOrchestrationHint() — 群组编排提示
-    │       包含角色回答规划提示 + 分视角历史说明 + 参与者列表
-    │
-    ├──► 5. dispatchSystemPromptComposeHooks(compose_sections)
-    │       钩子可修改已组装的提示词
-    │
-    └──► 6. dispatchSystemPromptComposeHooks(after_compose)
-            钩子可做最终修改
-```
-
-#### 10.2.4 子任务代理模板
-
-```kotlin
-val SUBTASK_AGENT_PROMPT_TEMPLATE =
-    """
-    BEHAVIOR GUIDELINES:
-    - You are a subtask-focused AI agent...
-    - TOOL SCHEDULING: All tools may be called either in parallel or sequentially...
-    - Summarize and Conclude...
-
-    TOOL_USAGE_GUIDELINES_SECTION
-    PACKAGE_SYSTEM_GUIDELINES_SECTION
-    ACTIVE_PACKAGES_SECTION
-    AVAILABLE_TOOLS_SECTION
-    """.trimIndent()
-```
-
-子任务代理**没有自我介绍和工作区指南**，专注于任务执行，用于 `send_message_to_ai` 等嵌套 Agent 场景。SystemPromptConfig 定义的 `SUBTASK_AGENT_PROMPT_TEMPLATE` 子任务代理模板，专门用于 `send_message_to_ai` 创建的子 AI 任务。子任务代理使用独立的提示词模板，专注于执行单一子任务而非完整对话。
-
-#### 10.2.5 工作区规则文件集成
-
-系统提示词支持集成工作区规则文件（`workspace_rule_file`），当项目目录中存在规则文件时，其内容会被自动注入到系统提示词中，为 AI 提供项目特定的行为指南。
-
-规则文件通过 `WorkspaceAttachmentProcessor.readWorkspaceRootRuleFile()` 读取，内容被包装在 `<workspace_rule_file>` 标签中注入 `WORKSPACE_GUIDELINES_SECTION`：
-
-```
-工作区根目录规则文件：
-- 工作区根目录存在 `{文件名}`，请将以下内容视为当前项目的工作区专属指令。
-<workspace_rule_file name="{文件名}">
-{规则文件内容}
-</workspace_rule_file>
-```
-
-#### 10.2.6 群组编排提示
-
-通过 `enableGroupOrchestrationHint` 参数，系统可注入群组编排提示，支持多角色协作对话场景。相关参数包括：
-
-- `groupOrchestrationRoleName` — 当前角色名称
-- `groupParticipantNamesText` — 群组参与者列表
-
-`buildGroupOrchestrationHint()` 生成的提示内容包含：
-
-1. **角色回答规划提示**：告知 AI 当前会话启用了角色回答规划，系统会动态决定谁回答及回答顺序
-2. **角色分视角历史说明**：带 `[From role: xxx]` 前缀的消息仅为上下文参考，不是新指令
-3. **群组参与者列表**：列出当前群聊的所有参与者
-
-### 10.3 工具提示词系统
-
-#### 10.3.1 工具分类体系
-
-```
-SystemToolPrompts
-├── basicTools          ← 基础工具 (sleep, use_package)
-├── fileSystemTools     ← 文件系统工具 (read_file, write_file, list_files, grep_code 等 10 个)
-├── httpTools           ← HTTP 工具 (visit_web)
-├── memoryTools         ← 记忆库工具 (query_memory, get_memory_by_title)
-└── internalToolCategories ← 内部工具 (来自 SystemToolPromptsInternal)
-    ├── execute_shell
-    ├── create_terminal_session
-    ├── execute_in_terminal_session
-    ├── start_app / tap / swipe / setInputText
-    ├── run_ui_subagent
-    └── send_message_to_ai / send_message_to_ai_streaming
-```
-
-#### 10.3.2 结构化工具定义
-
-每个工具使用 `ToolPrompt` 结构化定义：
-
-```kotlin
-ToolPrompt(
-    name = "read_file",
-    description = "Read the content of a file...",
-    parametersStructured = listOf(
-        ToolParameterSchema(name = "path", type = "string", description = "...", required = true),
-        ToolParameterSchema(name = "environment", type = "string", description = "...", required = false),
-        ToolParameterSchema(name = "intent", type = "string", description = "...", required = false),
-    ),
-    details = "..."  // 可选的详细说明
-)
-```
-
-工具分类使用 `SystemToolPromptCategory`：
-
-```kotlin
-SystemToolPromptCategory(
-    categoryName = "File System Tools",
-    tools = listOf(...),
-    categoryFooter = "..."  // 可选的分类尾部说明
-)
-```
-
-#### 10.3.3 参数动态暴露
-
-工具参数根据模型的**多模态能力**动态调整，避免暴露模型无法使用的参数：
-
-```kotlin
-val shouldExposeIntent =
-    (hasBackendImageRecognition && !chatModelHasDirectImage) ||
-    (hasBackendAudioRecognition && !chatModelHasDirectAudio) ||
-    (hasBackendVideoRecognition && !chatModelHasDirectVideo)
-
-// read_file 工具动态参数
-if (tool.name == "read_file") {
-    filteredParams = tool.parametersStructured.filter { param ->
-        when (param.name) {
-            "direct_image" -> false    // 始终隐藏（通过 Tool Call API image 字段传递）
-            "direct_audio" -> false    // 始终隐藏
-            "direct_video" -> false    // 始终隐藏
-            "intent" -> shouldExposeIntent  // 仅后端识别需要时暴露
-            else -> true
-        }
-    }
-}
-```
-
-**参数暴露决策矩阵**：
-
-| 参数 | 暴露条件 | 原因 |
-|------|---------|------|
-| `direct_image` | 始终不暴露 | 通过 Tool Call API 的 image 字段传递 |
-| `direct_audio` | 始终不暴露 | 同上 |
-| `direct_video` | 始终不暴露 | 同上 |
-| `intent` | 后端识别服务可用 且 模型无直接能力 | 仅在需要后端识别时才暴露 |
-
-#### 10.3.4 工具可见性过滤
-
-角色卡工具白名单通过 `applyToolVisibility` 实现过滤：
-
-```kotlin
-private fun applyToolVisibility(
-    categories: List<SystemToolPromptCategory>,
-    toolVisibility: Map<String, Boolean>
-): List<SystemToolPromptCategory> {
-    return categories.mapNotNull { category ->
-        val visibleTools = category.tools.filter { tool ->
-            toolVisibility[tool.name] ?: true  // 默认可见
-        }
-        if (visibleTools.isEmpty()) null else category.copy(tools = visibleTools)
-    }
-}
-```
-
-#### 10.3.5 SAF 书签动态注入
-
-SAF（Storage Access Framework）书签名被动态注入到 `read_file` 工具描述尾部：
-
-```
-**Attached Local Storage Repository:**
-- environment (optional): you can also use `environment="repo:<repositoryName>"`...
-- Available repositories: repo:Documents, repo:Downloads
-```
-
-#### 10.3.6 工具提示词生成流程（含钩子）
-
-```
-generateToolsPromptEn/Cn()
-    │
-    ├──► 1. 构建 categories（根据参数动态调整）
-    │
-    ├──► 2. buildToolHookPayload(categories) → 转为 Map 结构
-    │
-    ├──► 3. dispatchToolPromptComposeHooks(before_compose)
-    │       钩子可完全覆盖 toolPrompt
-    │
-    ├──► 4. 若钩子未覆盖 → applyToolVisibility + joinToString 生成默认提示词
-    │
-    ├──► 5. dispatchToolPromptComposeHooks(filter_tool_prompt_items)
-    │       钩子可过滤/修改工具列表
-    │
-    ├──► 6. dispatchToolPromptComposeHooks(after_compose)
-    │       钩子可做最终修改
-    │
-    └──► 7. 返回最终 toolPrompt
-```
-
-### 10.4 功能提示词
-
-[FunctionalPrompts.kt](app/src/main/java/com/ai/assistance/operit/core/config/FunctionalPrompts.kt) 为独立功能模块提供专用提示词：
-
-| 功能模块 | 方法/常量 | 用途 |
-|---------|----------|------|
-| **对话摘要** | `SUMMARY_PROMPT` / `SUMMARY_PROMPT_EN` | 生成对话摘要的固定格式提示词 |
-| **文件合并** | `FILE_BINDING_MERGE_PROMPT` | `// ... existing code ...` 占位符合并 |
-| **记忆自动分类** | `buildMemoryAutoCategorizePrompt()` | 为记忆分配合适的文件夹路径 |
-| **知识图谱提取** | `buildKnowledgeGraphExtractionPrompt()` | 从对话中构建长期记忆图谱 |
-| **UI 控制器** | `UI_CONTROLLER_PROMPT` | 单步 UI 自动化（返回 JSON） |
-| **UI 自动化代理** | `UI_AUTOMATION_AGENT_PROMPT` | 多步 UI 自动化（AutoGLM 风格） |
-| **代码搜索** | `grepContextRefineWithReadPrompt()` / `grepContextSelectPrompt()` | grep_code 多轮搜索精炼 |
-| **角色卡生成** | `personaCardGenerationSystemPrompt()` | 8 步角色卡生成流程 |
-| **群聊发言规划** | `GROUP_ROLE_RESPONSE_PLANNER_PROMPT` | 规划群聊成员发言顺序 |
-| **翻译** | `translationSystemPrompt()` | 翻译助手 |
-| **包描述生成** | `packageDescriptionSystemPrompt()` | 为 MCP 工具包生成描述 |
-| **虚拟形象情绪** | `avatarMoodRulesText()` | 驱动虚拟形象动作的 mood 标签规则 |
-
-#### 10.4.1 知识图谱提取提示词架构
-
-这是最复杂的功能提示词，包含完整的结构化输出规范：
-
-```
-[写入前先过筛] → 只记录用户特异且可复用的信息
-[抽取策略]     → 优先 update/merge，其次 new（最多5条）
-[语气策略]     → 可变表达方式，不变入库标准
-[标题与内容写法] → 事件优先，不写定义
-[连接关系规则] → 需要明确证据才建边
-[示例]         → 10+种场景的期望输出
-[输出格式]     → 严格 JSON: main/new/update/merge/links/user
-```
-
-输出 Schema：
-
-```json
-{
-  "main": ["Title", "Content", ["tags"], "folder_path"] | null,
-  "new": [["Title", "Content", ["tags"], "folder_path", "alias_for_or_null"], ...],
-  "update": [["Title", "New content", "Reason", credibility, importance], ...],
-  "merge": [{"source_titles":["A","B"], "new_title":"...", "new_content":"...", "reason":"..."}, ...],
-  "links": [["Source", "Target", "RELATION_TYPE", "Description", weight], ...],
-  "user": { "age": "...", "gender": "...", "personality": "..." }
-}
-```
-
-#### 10.4.2 UI 自动化代理提示词
-
-采用 AutoGLM 风格的 `think/answer` 格式：
-
-```
-<think{think}</think_>
-<answer>{action}</answer>
-```
-
-支持的操作指令：`Launch`, `Tap`, `Type`, `Swipe`, `Long Press`, `Double Tap`, `Back`, `Home`, `Wait`, `finish` 等 19 条严格规则。
-
-### 10.5 七阶段钩子系统
-
-#### 10.5.1 钩子数据模型
-
-```kotlin
-data class PromptHookContext(
-    val stage: String,                    // 当前阶段名
-    val chatId: String? = null,
-    val functionType: String? = null,
-    val rawInput: String? = null,         // 原始用户输入
-    val processedInput: String? = null,   // 处理后的输入
-    val chatHistory: List<PromptTurn>,    // 聊天历史
-    val preparedHistory: List<PromptTurn>,// 准备好的历史
-    val systemPrompt: String? = null,     // 系统提示词
-    val toolPrompt: String? = null,       // 工具提示词
-    val availableTools: List<Map<String, Any?>>,  // 可用工具列表
-    val metadata: Map<String, Any?>       // 元数据
-)
-
-data class PromptHookMutation(
-    val rawInput: String? = null,
-    val processedInput: String? = null,
-    val chatHistory: List<PromptTurn>? = null,
-    val preparedHistory: List<PromptTurn>? = null,
-    val systemPrompt: String? = null,
-    val toolPrompt: String? = null,
-    val metadata: Map<String, Any?> = emptyMap()
-)
-```
-
-**Mutation 合并规则**：非 null 字段覆盖，metadata 做 merge（`current.metadata + mutation.metadata`）。
-
-#### 10.5.2 七阶段钩子接口
-
-| 阶段 | 接口 | 触发时机 | 可修改字段 |
-|------|------|---------|-----------|
-| 1 | `PromptInputHook` | 用户输入预处理 | `processedInput`, `rawInput` |
-| 2 | `PromptHistoryHook` | 聊天历史准备 | `chatHistory`, `preparedHistory` |
-| 3 | `PromptEstimateHistoryHook` | 估算 Token 时的历史 | `chatHistory`, `preparedHistory` |
-| 4 | `SystemPromptComposeHook` | 系统提示词组装 | `systemPrompt` |
-| 5 | `ToolPromptComposeHook` | 工具提示词组装 | `toolPrompt` |
-| 6 | `PromptFinalizeHook` | 最终提示词定稿 | `processedInput`, `preparedHistory` |
-| 7 | `PromptEstimateFinalizeHook` | 估算 Token 时的定稿 | `processedInput`, `preparedHistory` |
-
-#### 10.5.3 分发机制
-
-```kotlin
-private fun <THook> dispatch(
-    initialContext: PromptHookContext,
-    hooks: List<THook>,
-    hookLabel: String,
-    invoke: (THook, PromptHookContext) -> PromptHookMutation?
-): PromptHookContext {
-    var current = initialContext
-    hooks.forEach { hook ->
-        val mutation = runCatching { invoke(hook, current) }
-            .onFailure { error -> AppLogger.e(TAG, "$hookLabel callback failed", error) }
-            .getOrNull() ?: return@forEach
-        current = applyMutation(current, mutation)
-    }
-    return current
-}
-```
-
-关键特性：
-- **链式处理**：每个钩子接收上一个钩子的输出作为输入
-- **容错**：单个钩子失败不影响后续钩子（`runCatching`）
-- **线程安全**：使用 `CopyOnWriteArrayList` 存储钩子
-- **去重注册**：注册时先按 id 移除旧钩子
-
-#### 10.5.4 SystemPromptComposeHook 的三个子阶段
-
-```
-Stage 1: before_compose_system_prompt  → 钩子可完全覆盖系统提示词
-Stage 2: compose_system_prompt_sections → 钩子可修改已组装的提示词
-Stage 3: after_compose_system_prompt    → 钩子可做最终修改
-```
-
-#### 10.5.5 ToolPromptComposeHook 的三个子阶段
-
-```
-Stage 1: before_compose_tool_prompt  → 钩子可完全覆盖工具提示词
-Stage 2: filter_tool_prompt_items    → 钩子可过滤/修改工具列表
-Stage 3: after_compose_tool_prompt   → 钩子可做最终修改
-```
-
-### 10.6 ToolPkg 钩子桥接
-
-[ToolPkgPromptHookBridge.kt](app/src/main/java/com/ai/assistance/operit/plugins/toolpkg/ToolPkgPromptHookBridge.kt) 是 **ToolPkg 运行时** 与 **PromptHookRegistry** 之间的桥梁，将 7 个内部 Bridge 对象注册为 7 阶段钩子：
-
-```
-ToolPkg JS 脚本
-    │
-    ├──► registerToolPkgPromptHook({ event: "toolpkg_system_prompt_compose", ... })
-    │
-    ├──► ToolPkgPromptHookBridge (Kotlin)
-    │       • 将 JS 钩子注册转换为 PromptHookRegistry 钩子
-    │       • 7 个桥接对象对应 7 个阶段
-    │       • 通过 ToolPkgRuntimeChangeListener 同步钩子注册
-    │
-    └──► PromptHookRegistry (Kotlin)
-            • 分发钩子事件
-            • 应用钩子修改
-```
-
-**分发流程**：
-
-```
-1. 遍历该阶段的所有 ToolPkg 钩子注册
-2. 对每个注册，调用 manager.runToolPkgMainHook()
-   - 传入 containerPackageName, functionName, event, eventPayload
-3. 解码返回结果 (decodeToolPkgHookResult)
-4. 根据阶段类型解析为 PromptHookMutation
-5. 应用 mutation 到当前 context
-6. 返回合并后的最终 mutation
-```
-
-**各阶段的 Mutation 解析**：
-
-| 阶段 | 解析方法 | 返回类型 |
-|------|---------|---------|
-| PromptInput | `parsePromptInputMutation` | String→processedInput, JSONObject→全字段 |
-| PromptHistory | `parsePromptHistoryMutation` | JSONArray→chatHistory/preparedHistory |
-| SystemPromptCompose | `parseSystemPromptMutation` | String→systemPrompt |
-| ToolPromptCompose | `parseToolPromptMutation` | String→toolPrompt |
-| PromptFinalize | `parsePromptFinalizeMutation` | String→processedInput, JSONArray→preparedHistory |
-
-### 10.7 其他钩子系统
-
-除了 7 阶段提示词钩子外，Operit 还提供了多种其他钩子系统，覆盖工具执行、应用生命周期、消息处理等场景：
-
-| 钩子系统 | 触发时机 | 用途 |
-|----------|----------|------|
-| **AIToolHook** | 工具执行生命周期 | 通知 UI 更新、日志记录、安全审计 |
-| **AppLifecycleHook** | 应用生命周期事件 | ToolPkg 响应前后台切换 |
-| **ToolLifecycleHook** | 工具执行前后 | ToolPkg 拦截/修改工具行为 |
-| **XmlRenderHook** | XML 标签渲染 | ToolPkg 自定义消息渲染 |
-| **MessageProcessingHook** | 消息处理 | ToolPkg 修改消息内容 |
-
-**AIToolHook** 是安全审计的核心钩子，提供完整的工具执行生命周期追踪：
-
-```kotlin
-interface AIToolHook {
-    fun onToolCallRequested(tool: AITool)           // 工具调用请求
-    fun onToolPermissionChecked(tool: AITool, granted: Boolean, reason: String?)  // 权限检查结果
-    fun onToolExecutionStarted(tool: AITool)        // 执行开始
-    fun onToolExecutionResult(tool: AITool, result: ToolResult)  // 执行结果
-    fun onToolExecutionError(tool: AITool, throwable: Throwable) // 执行异常
-    fun onToolExecutionFinished(tool: AITool)       // 执行完成
-}
-```
-
-ToolPkg 可以通过 `ToolPkgToolLifecycleBridge` 拦截和修改工具行为，实现自定义安全策略和工具增强。
-
-### 10.8 CLI 模式提示词
-
-#### 10.8.1 CLI 模式架构
-
-对于不支持 Function Calling 的本地模型，系统自动切换为 CLI 模式，使用 **search + proxy** 两步代理方式暴露工具能力：
-
-```
-AI 需要执行工具时：
-    │
-    ├──► Step 1: search(query)
-    │       搜索隐藏的工具目录
-    │       返回匹配的工具名称、描述和参数提示
-    │
-    └──► Step 2: proxy(tool_name, params)
-            代理执行实际工具
-            返回工具执行结果
-```
-
-#### 10.8.2 隐藏工具目录构建
-
-从多个来源构建完整的隐藏工具目录：
-
-| 来源类型 | 说明 |
-|---------|------|
-| BUILTIN | 内置工具（SystemToolPrompts） |
-| INTERNAL | 内部工具（SystemToolPromptsInternal） |
-| PACKAGE | JS 包工具（PackageManager） |
-| ACTIVATION | 技能包（SkillRepository） |
-| MCP | MCP 工具（MCPLocalServer） |
-
-每个目录条目结构：
-
-```kotlin
-data class HiddenToolCatalogEntry(
-    val targetToolName: String,       // 实际工具名（如 "read_file" 或 "pkg:tool"）
-    val displayName: String,          // 显示名
-    val description: String,          // 描述
-    val parameterHints: List<String>, // 参数提示
-    val sourceKind: HiddenToolSourceKind,  // 来源类型
-    val keywords: List<String>,       // 搜索关键词
-    val suggestedParamsJson: String?  // 建议的参数 JSON
-)
-```
-
-#### 10.8.3 搜索评分算法
-
-| 匹配条件 | 分数 |
-|---------|------|
-| displayName/targetName 完全匹配 | +300 |
-| displayName/targetName 前缀匹配 | +140 |
-| displayName/targetName 包含匹配 | +100 |
-| description/keywords 包含 | +40 |
-| params 包含 | +25 |
-| 每个搜索词在 name 中匹配 | +40 |
-| 每个搜索词在 keywords 中匹配 | +16 |
-| 每个搜索词在 description 中匹配 | +12 |
-| 每个搜索词在 params 中匹配 | +8 |
-| 所有搜索词都匹配 | +30 |
-
-### 10.9 FULL 模式 vs CLI 模式对比
-
-| 维度 | FULL 模式 | CLI 模式 |
-|------|---------|--------|
-| **适用模型** | 云端 API（OpenAI, Claude 等） | 本地推理（Ollama, LMStudio 等） |
-| **工具暴露方式** | 所有工具直接列出 | 只有 search+proxy 两个公开工具 |
-| **工具描述位置** | 系统提示词中完整展示 | 隐藏在目录中，按需搜索 |
-| **调用格式** | XML 格式 `<tool name="...">` | search → proxy 两步调用 |
-| **包系统说明** | 完整展示 | 不展示 |
-| **参数暴露** | 动态调整（根据模型能力） | 通过 search 结果展示参数提示 |
-| **Token 消耗** | 较高（完整工具列表） | 较低（按需搜索） |
-| **Tool Call API 兼容** | 支持（工具通过 API 字段发送） | 不适用 |
-
-### 10.10 完整提示词构建流程图
-
-```mermaid
-flowchart TB
-    UserInput[用户发送消息] --> InputHook[PromptInputHook<br/>修改用户输入]
-
-    InputHook --> HistoryHook[PromptHistoryHook<br/>修改聊天历史]
-
-    HistoryHook --> BuildSystem[getSystemPromptWithCustomPrompts]
-
-    BuildSystem --> BeforeCompose[SystemPromptComposeHook<br/>before_compose]
-    BeforeCompose --> BaseTemplate[getSystemPrompt<br/>基础模板 + Section替换]
-
-    BaseTemplate --> ModeCheck{工具暴露模式?}
-
-    ModeCheck -->|FULL| FullMode[TOOL_USAGE ← XML格式说明<br/>PACKAGE ← 完整包说明<br/>TOOLS ← SystemToolPrompts]
-    ModeCheck -->|ToolCall API| TcaMode[TOOL_USAGE ← 空<br/>PACKAGE ← ToolCall版<br/>TOOLS ← 空]
-    ModeCheck -->|CLI| CliMode[TOOL_USAGE ← CLI说明<br/>PACKAGE ← 空<br/>TOOLS ← 空]
-
-    FullMode --> ToolPrompt[generateToolsPromptEn/Cn]
-    ToolPrompt --> ToolBefore[ToolPromptComposeHook<br/>before_compose]
-    ToolBefore --> ToolFilter[动态参数暴露 + 可见性过滤]
-    ToolFilter --> ToolAfter[ToolPromptComposeHook<br/>after_compose]
-
-    TcaMode --> CustomPrompts
-    CliMode --> CustomPrompts
-    ToolAfter --> CustomPrompts
-
-    CustomPrompts[applyCustomPrompts<br/>角色卡自定义提示词注入] --> GroupHint[buildGroupOrchestrationHint<br/>群组编排提示]
-    GroupHint --> ComposeHook[SystemPromptComposeHook<br/>compose_sections]
-    ComposeHook --> AfterHook[SystemPromptComposeHook<br/>after_compose]
-
-    AfterHook --> Finalize[PromptFinalizeHook<br/>最终定稿]
-    Finalize --> SendLLM[发送给 LLM]
-```
-
----
-
-## 十一、上下文管理系统设计
-
-### 11.1 系统架构总览
-
-Operit 的上下文管理系统负责**Token 预算管理、对话历史截断、执行上下文隔离和流式消息处理**，确保在有限的上下文窗口内高效运行多轮推理：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          输入处理层                                          │
-│  InputProcessor (PromptInputHooks 分发)                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          对话准备层                                          │
-│  ConversationService (历史准备 / XML标签拆分 / 消息合并)                       │
-│  SystemPromptConfig (动态系统提示词构建)                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          Token 管理层                                        │
-│  TokenCacheManager (公共前缀缓存优化)                                         │
-│  MNNProvider.trimHistoryToTokenBudget (二分查找精确裁剪)                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          截断与总结层                                         │
-│  MessageCoordinationDelegate (总结触发 / Token超限处理 / 自动续聊)              │
-│  AIMessageManager.shouldGenerateSummary (触发条件判断)                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          执行隔离层                                          │
-│  MessageExecutionContext (并发隔离 / 轮次管理 / 事件通道)                       │
-│  ConversationRoundManager (多轮对话轮次切换)                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          数据持久层                                          │
-│  ChatHistoryManager (Repository)                                             │
-│  AppDatabase → ChatDao / MessageDao / MessageVariantDao                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 11.2 Token 计数与预算管理
-
-#### 11.2.1 TokenCacheManager — 公共前缀缓存优化
-
-[TokenCacheManager.kt](app/src/main/java/com/ai/assistance/operit/util/TokenCacheManager.kt) 利用公共前缀缓存避免重复计算相同内容的 Token：
-
-```kotlin
-private var previousChatHistory: List<Pair<String, String>> = emptyList()  // 上一次的聊天历史
-private var previousHistoryTokenCount = 0                                    // 对应的 token 数量
-private var _cachedInputTokenCount = 0      // 缓存命中的 token 数量
-private var _currentInputTokenCount = 0     // 当前请求新增的 token 数量
-private var _outputTokenCount = 0           // 输出 token 数量
-```
-
-**核心计算流程**：
-
-```
-calculateInputTokens(chatHistory, toolsJson, updateState)
-    │
-    ├──► 1. 将 toolsJson 拼接到 System Prompt 前面
-    │       使工具定义也能被前缀匹配缓存
-    │
-    ├──► 2. findCommonPrefixLength(current, previous)
-    │       逐条比较两个历史列表，返回公共前缀长度
-    │
-    ├──► 3. 缓存部分直接复用 previousHistoryTokenCount
-    │       新增部分重新计算 estimateTokenCount()
-    │
-    ├──► 4. updateState=false 时为只读预估模式，不更新内部状态
-    │
-    └──► 5. 更新 previousChatHistory 和 previousHistoryTokenCount
-```
-
-**Gemini 缓存统计**：对于支持服务端缓存统计的 API（如 Gemini），使用 `updateActualTokens()` 用服务端返回的实际值覆盖本地估算。
-
-#### 11.2.2 MNN 本地模型 — 二分查找精确裁剪
-
-[MNNProvider.kt](app/src/main/java/com/ai/assistance/operit/api/chat/llmprovider/MNNProvider.kt) 使用 MNN 原生 tokenizer 进行精确 Token 计数，并通过二分查找裁剪历史到 Token 预算内：
-
-```kotlin
-private fun trimHistoryToTokenBudget(
-    session: MNNLlmSession,
-    history: List<Pair<String, String>>,
-    maxPromptTokens: Int
-): List<Pair<String, String>>
-```
-
-**二分查找裁剪算法**：
-
-```
-1. 快速路径: 如果完整历史已不超过预算，直接返回
-
-2. 保护 system prompt: 识别并保留第一条 system 消息
-
-3. 二分搜索: 在 [systemPrefixCount, history.size - 1] 范围内
-   搜索最小裁剪起点
-   ┌───────────────────────────────────────────────┐
-   │  low = systemPrefixCount                       │
-   │  high = history.size - 1                       │
-   │  while (low < high):                           │
-   │      mid = (low + high) / 2                    │
-   │      candidate = system + history[mid..end]    │
-   │      tokens = session.countTokensWithHistory() │
-   │      if tokens > maxPromptTokens:              │
-   │          low = mid + 1   // token 太多，裁剪更多│
-   │      else:                                     │
-   │          high = mid      // token 够少，尝试更少│
-   └───────────────────────────────────────────────┘
-
-4. 构建最终结果: system + history[low..end]
-
-5. 兜底: 如果裁剪后仍超预算（system 本身就很大），
-   尝试去掉 system
-```
-
-**Token 预算计算**：
-
-```kotlin
-val maxAllTokens = readModelMaxAllTokens(modelDir)  // 从 llm_config.json 读取
-val effectiveMaxNewTokens = (requestedMaxNewTokens.coerceAtMost(8192))
-val maxPromptTokens = (maxAllTokens - effectiveMaxNewTokens).coerceAtLeast(128)
-val safeHistory = trimHistoryToTokenBudget(session, conversationHistory, maxPromptTokens)
-```
-
-**精确 Token 计数**：MNN 使用实际的 tokenizer（而非估算），`countTokensWithHistory` 方法会考虑聊天模板（chat template）的格式化开销，比纯文本计数更精确。
-
-### 11.3 历史截断与总结策略
-
-截断通过**总结机制**实现，而非简单截断。系统在 Token 使用率超过阈值时，自动生成对话总结并替换旧消息。
-
-#### 11.3.1 总结触发条件
-
-`AIMessageManager.shouldGenerateSummary` 判断是否需要生成总结：
-
-```kotlin
-fun shouldGenerateSummary(
-    messages: List<ChatMessage>,
-    currentTokens: Int,
-    maxTokens: Int,
-    tokenUsageThreshold: Double,        // 默认 0.7~0.8
-    enableSummary: Boolean,
-    enableSummaryByMessageCount: Boolean,
-    summaryMessageCountThreshold: Int
-): Boolean
-```
-
-**触发条件（满足任一即可）**：
-
-| 条件 | 公式 | 说明 |
-|------|------|------|
-| Token 使用率超阈值 | `currentTokens / maxTokens >= tokenUsageThreshold` | 默认阈值 0.7~0.8 |
-| 消息条数超阈值 | 自上次总结后的 user 消息数 >= `summaryMessageCountThreshold` | 按消息数触发 |
-
-#### 11.3.2 三种总结场景
-
-**场景 1：发送前异步总结**（`launchAsyncSummaryForSend`）
-
-在 `sendMessageInternal` 中，发送消息前检查是否需要总结：
-
-```
-sendMessageInternal()
-    │
-    ├──► shouldGenerateSummary() → true
-    │
-    ├──► launchAsyncSummaryForSend()
-    │       异步生成总结，不阻塞当前消息发送
-    │
-    └──► tokenUsageThresholdForSend += 0.5
-            提高阈值，避免立即再次触发
-```
-
-关键点：**异步总结不阻塞消息发送**，总结完成后插入历史记录并刷新上下文窗口。
-
-**场景 2：Token 超限触发总结**（`handleTokenLimitExceeded`）
-
-在 AI 回复过程中（工具调用后），如果 Token 使用率超过阈值：
-
-```
-processStreamCompletion()
-    │
-    ├──► 计算当前 usageRatio
-    │
-    └──► if (usageRatio >= tokenUsageThreshold)
-            ├──► onTokenLimitExceeded?.invoke()
-            ├──► context.isConversationActive.set(false)  // 终止当前对话
-            └──► return  // 直接返回，后续流程由回调处理
-```
-
-回调触发 `summarizeHistory(autoContinue = true)`，总结后自动续写。
-
-**场景 3：手动触发总结**（`manuallySummarizeConversation`）
-
-用户主动触发的总结操作。
-
-#### 11.3.3 总结核心逻辑
-
-```
-summarizeHistory(autoContinue, promptFunctionType, chatIdOverride, ...)
-    │
-    ├──► 1. 检查是否已在总结中（防重入）
-    │
-    ├──► 2. 设置 UI 状态为 Summarizing
-    │
-    ├──► 3. AIMessageManager.summarizeMemory()
-    │       使用 SUMMARY 模型生成对话总结
-    │
-    ├──► 4. addSummaryMessage()
-    │       将总结消息插入历史记录
-    │
-    ├──► 5. refreshStableContextWindow()
-    │       刷新上下文窗口
-    │
-    └──► 6. if (autoContinue == true)
-            ├── 当前无其他请求 → 直接发送续写消息
-            └── 当前有请求在处理 → 排队等待 (queuePendingAutoContinuation)
-```
-
-#### 11.3.4 自动续聊排队机制
-
-```
-queuePendingAutoContinuation(chatId, promptFunctionType, ...)
-    │
-    ├──► 1. cancelPendingAutoContinuation(chatId)
-    │
-    ├──► 2. setSuppressIdleCompletedStateForChat(chatId, true)
-    │       抑制 Idle 完成状态
-    │
-    ├──► 3. 创建 PendingAutoContinuationRequest
-    │
-    └──► 4. request.waitJob = launch {
-            ├── awaitTurnComplete(chatId, targetCounter)
-            │       等待上一轮完成
-            └── sendMessageInternal(isContinuation = true, isAutoContinuation = true)
-                    派发自动续聊
-            }
-```
-
-#### 11.3.5 完整截断与总结流程图
-
-```mermaid
-flowchart TD
-    Send[发送消息] --> CheckSummary{需要总结?}
-    CheckSummary -->|否| Normal[正常发送]
-    CheckSummary -->|是: Token超限| AsyncSummary[异步生成对话总结<br/>不阻塞发送]
-    CheckSummary -->|是: 消息数超限| AsyncSummary
-
-    AsyncSummary --> RaiseThreshold[提高阈值 +0.5<br/>避免立即再次触发]
-    RaiseThreshold --> Normal
-
-    Normal --> StreamProcess[流式处理 AI 回复]
-    StreamProcess --> ToolCall{包含工具调用?}
-
-    ToolCall -->|否| FinalReply[返回最终回复]
-    ToolCall -->|是| ExecuteTools[执行工具]
-
-    ExecuteTools --> CheckToken{Token 使用率<br/>超阈值?}
-    CheckToken -->|否| ContinueLoop[继续 ReAct 循环]
-    CheckToken -->|是| Terminate[终止当前对话<br/>isConversationActive = false]
-
-    Terminate --> SyncSummary[同步生成对话总结]
-    SyncSummary --> InsertSummary[插入总结到历史]
-    InsertSummary --> RefreshWindow[刷新上下文窗口]
-    RefreshWindow --> AutoContinue{自动续聊?}
-    AutoContinue -->|是: 无其他请求| DirectContinue[直接发送续写]
-    AutoContinue -->|是: 有请求处理中| QueueContinue[排队等待后自动续写]
-    AutoContinue -->|否| Idle[恢复 Idle 状态]
-```
-
-### 11.4 执行上下文隔离
-
-#### 11.4.1 MessageExecutionContext
-
-每个 `sendMessage` 调用创建独立的 `MessageExecutionContext`，实现并发请求之间的隔离：
-
-```kotlin
-private data class MessageExecutionContext(
-    val executionId: Int,                              // 唯一执行ID（AtomicInteger递增）
-    val streamBuffer: StringBuilder = StringBuilder(),  // 响应缓冲区
-    val roundManager: ConversationRoundManager = ConversationRoundManager(),
-    val isConversationActive: AtomicBoolean = AtomicBoolean(true),
-    val conversationHistory: MutableList<PromptTurn>,   // 对话历史
-    val eventChannel: MutableSharedStream<TextStreamEvent>,  // 事件通道
-)
-```
-
-`eventChannel` 支持流式修订事件：
-
-- `TextStreamEventType.SAVEPOINT` — 创建内容快照点
-- `TextStreamEventType.ROLLBACK` — 回滚到之前的快照点
-- 用于处理 AI 响应中的内容回溯（如工具调用结果的流式修正）
-
-各 Provider（OpenAI、Claude、Gemini）在工具调用前发射 SAVEPOINT，工具结果替换原始输出时发射 ROLLBACK，UI 层通过 `TextStreamRevisionTracker` 处理这些事件实现内容修订。
-
-#### 11.4.2 上下文管理方法
-
-| 方法 | 作用 |
-|------|------|
-| `registerExecutionContext(context)` | 注册到 `activeExecutionContexts` ConcurrentHashMap |
-| `unregisterExecutionContext(context)` | 从 Map 中移除 |
-| `invalidateExecutionContext(context, reason)` | 将 `isConversationActive` 设为 false，终止该上下文 |
-| `invalidateAllExecutionContexts(reason)` | 使所有活跃上下文失效 |
-| `isExecutionContextActive(context)` | 检查上下文是否仍活跃且在 Map 中 |
-
-#### 11.4.3 并发隔离设计
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  activeExecutionContexts: ConcurrentHashMap<Int, Context>     │
-│                                                               │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │ Context #1       │  │ Context #2       │  │ Context #3   │ │
-│  │ executionId=1    │  │ executionId=2    │  │ executionId=3│ │
-│  │ roundManager     │  │ roundManager     │  │ roundManager │ │
-│  │ streamBuffer     │  │ streamBuffer     │  │ streamBuffer │ │
-│  │ isActive=true    │  │ isActive=false   │  │ isActive=true│ │
-│  │ convHistory      │  │ convHistory      │  │ convHistory  │ │
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-│                                                               │
-│  Token超限 → invalidate #1 → isActive=false → 安全终止       │
-│  用户取消 → invalidateAll → 所有 isActive=false              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-多个并发请求可以并行执行，互不干扰。`isConversationActive` 作为原子标志位，用于在 Token 超限、用户取消等场景下安全终止特定上下文。
-
-### 11.5 对话轮次管理
-
-#### 11.5.1 ConversationRoundManager
-
-[ConversationRoundManager.kt](app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ConversationRoundManager.kt) 管理单次 AI 请求中的多轮对话（工具调用触发的新轮次）：
-
-```kotlin
-class ConversationRoundManager {
-    private val roundContents = mutableMapOf<Int, String>()     // 轮次号 → 内容
-    private val currentResponseRound = AtomicInteger(0)          // 当前轮次号
-    private val roundSeparatorPattern = Regex("--- Round \\d+ ---\n")  // 轮次分隔符正则
-}
-```
-
-轮次分割使用纯文本分隔符：
-
-- 格式：`--- Round %d ---\n`（`ROUND_SEPARATOR_FORMAT` 常量）
-- `getRawContent()` — 保留分割符的原始内容（用于 AI 上下文）
-- `getDisplayContent()` — 去除分割符的显示内容（用于 UI 展示）
-
-| 方法 | 作用 |
-|------|------|
-| `initializeNewConversation()` | 重置轮次为 0，清空所有内容 |
-| `startNewRound()` | 原子递增轮次号，初始化空内容，返回新轮次号 |
-| `updateContent(content)` | 更新当前轮次内容 |
-| `appendContent(content)` | 向当前轮次追加内容 |
-| `getDisplayContent()` | 按轮次顺序拼接内容（去除分隔符），用于 UI 展示 |
-| `getRawContent()` | 带轮次分隔符的原始内容（`--- Round N ---\n` + 内容） |
-
-#### 11.5.2 轮次切换流程
-
-```
-用户发送消息 → Round 0 (AI 回复)
-    │
-    ├──► 检测到工具调用 → startNewRound() → Round 1 (工具结果 + AI 继续回复)
-    │       │
-    │       ├──► 再次检测工具调用 → startNewRound() → Round 2 ...
-    │       │
-    │       └──► 无工具调用 → 结束
-    │
-    └──► 无工具调用 → 结束（单轮对话）
-```
-
-### 11.6 消息流式处理
-
-#### 11.6.1 XML 标签解析
-
-ChatMarkupRegex 定义了对话中的 XML 标签正则，用于从 AI 流式输出中实时提取结构化信息：
-
-| 标签 | 正则 | 用途 |
-|------|------|------|
-| `<tool name="...">` | `toolCallPattern` | 工具调用 |
-| `<tool_result>` | `toolResultTag` | 工具结果 |
-| `<think(ing)>` | `thinkTag` | AI 思考过程 |
-| `<status>` | `statusTag` | 状态指示 |
-
-**随机标签名**：`generateRandomToolTagName()` 生成随机后缀（如 `tool_Ab3x`），避免模型输出固定格式，`normalizeToolLikeTagName()` 将其归一化。
-
-#### 11.6.2 Tool Call API 转换
-
-不同 AI Provider 的工具调用格式统一转换为 XML 标签：
-
-| Provider | 原始格式 | 转换目标 |
-|----------|----------|----------|
-| OpenAI | `tool_calls` JSON | `<tool name="..."><param>...</param></tool>` |
-| Claude | `content_block_start/delta/stop` | `<tool name="..."><param>...</param></tool>` |
-| 本地模型 | 文本中的 XML 标签 | 直接使用 |
-
-#### 11.6.3 修订追踪
-
-`TextStreamRevisionTracker` 支持流式输出中的修订（SAVEPOINT/ROLLBACK），用于工具调用时回滚已输出但不完整的内容。
-
-### 11.7 输入处理与钩子分发
-
-[InputProcessor.kt](app/src/main/java/com/ai/assistance/operit/api/chat/enhance/InputProcessor.kt) 是用户输入进入上下文管理系统的入口：
-
-```kotlin
-object InputProcessor {
-    suspend fun processUserInput(input: String, chatId: String? = null): String {
-        // 阶段1: before_process
-        val beforeContext = PromptHookRegistry.dispatchPromptInputHooks(
-            PromptHookContext(stage = "before_process", chatId = chatId, rawInput = input, processedInput = input)
-        )
-        val processedInput = beforeContext.processedInput ?: beforeContext.rawInput ?: input
-
-        // 阶段2: after_process
-        val afterContext = PromptHookRegistry.dispatchPromptInputHooks(
-            beforeContext.copy(stage = "after_process", processedInput = processedInput)
-        )
-        return afterContext.processedInput ?: processedInput
-    }
-}
-```
-
-### 11.8 完整上下文管理流程图
-
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant IP as InputProcessor
-    participant MCD as MessageCoordinationDelegate
-    participant EAS as EnhancedAIService
-    participant TCM as TokenCacheManager
-    participant AI as AI Provider
-    participant CRM as ConversationRoundManager
-
-    User->>IP: 原始输入
-    IP->>IP: PromptInputHooks (before_process → after_process)
-    IP-->>MCD: 处理后输入
-
-    MCD->>MCD: shouldGenerateSummary?
-    alt 需要总结
-        MCD->>MCD: launchAsyncSummaryForSend()
-        Note over MCD: 异步总结，不阻塞
-        MCD->>MCD: tokenUsageThreshold += 0.5
-    end
-
-    MCD->>EAS: sendMessage(options)
-
-    EAS->>EAS: 创建 MessageExecutionContext
-    EAS->>EAS: prepareConversationHistory()
-    Note over EAS: HistoryHooks + SystemPrompt + ToolPrompt
-
-    EAS->>TCM: calculateInputTokens()
-    TCM-->>EAS: 当前 Token 数
-
-    EAS->>AI: sendMessage(history, params)
-
-    loop ReAct 循环
-        AI-->>EAS: Stream<String>
-        EAS->>CRM: updateContent(chunk)
-
-        alt 包含工具调用
-            EAS->>EAS: extractToolInvocations()
-            EAS->>EAS: executeInvocations()
-            EAS->>CRM: startNewRound()
-
-            EAS->>TCM: calculateInputTokens()
-            TCM-->>EAS: 更新 Token 数
-
-            alt Token 超限
-                EAS->>EAS: invalidateExecutionContext()
-                EAS-->>MCD: onTokenLimitExceeded
-                MCD->>MCD: summarizeHistory(autoContinue=true)
-                MCD->>EAS: 自动续写
-            else Token 正常
-                EAS->>AI: sendMessage(更新后的历史)
-            end
-        else 无工具调用
-            EAS-->>MCD: 最终回复
-        end
-    end
-
-    MCD-->>User: 显示回复
-```
-
----
-
-## 十二、Skill 系统设计
-
-### 12.1 系统定位
-
-Skill 系统是 Operit 中与 ToolPkg（JS 工具包）和 MCP（Model Context Protocol）并列的三大“包”扩展机制之一。Skill 的核心理念是：**以 Markdown 文件（SKILL.md）为载体，向 AI 注入领域知识/指令，让 AI 优先使用 Skill 提供的指令和捆绑脚本来完成任务**。与 ToolPkg 提供可执行工具不同，Skill 更偏向“知识注入 + 脚本辅助”模式。
-
-**Skill 存储位置**：`External Storage/Downloads/Operit/skills/`。每个 Skill 是一个独立目录，包含 `SKILL.md`（或 `skill.md`）文件作为入口。
-
-### 12.2 三种包扩展机制对比
-
-| 维度 | Skill | ToolPkg | MCP |
-|------|-------|---------|-----|
-| **载体格式** | SKILL.md (Markdown) | .toolpkg (HJSON/JS) | MCP Server Config |
-| **核心机制** | 知识注入（系统提示词） | 工具注册（可执行 JS 函数） | 工具注册（远程过程调用） |
-| **激活方式** | `use_package` | `use_package` | `use_package` |
-| **激活后效果** | 注入提示词到上下文 | 注册工具到 AIToolHandler | 建立 MCP 连接并注册工具 |
-| **AI 可见性** | SkillVisibilityPreferences 控制 | PackageManager enabled 控制 | MCPManager 注册控制 |
-| **角色卡控制** | `allowedSkills` 白名单 | `allowedPackages` 白名单 | `allowedMcpServers` 白名单 |
-| **存储位置** | `Downloads/Operit/skills/` | assets/packages + 缓存 | MCP 配置 |
-| **执行方式** | AI 根据提示词自主使用终端工具 | JS 引擎执行 | JSON-RPC 远程调用 |
-
-**核心区别**：Skill 不注册任何可执行工具，而是通过提示词让 AI "知道"如何使用 Skill 提供的脚本和知识。ToolPkg 和 MCP 则注册具体的可调用工具。
-
-### 12.3 数据模型
-
-#### 12.3.1 SkillPackage
-
-```kotlin
-data class SkillPackage(
-    val name: String,          // Skill 名称（来自 SKILL.md 的 frontmatter 或目录名）
-    val description: String,   // Skill 描述
-    val directory: File,       // Skill 所在的目录
-    val skillFile: File        // SKILL.md 文件本身
-)
-```
-
-核心信息只有 `name` 和 `description`，实际的知识内容全部存储在 `skillFile`（SKILL.md）中。
-
-#### 12.3.2 SkillMetadata（市场发布元数据）
-
-```kotlin
-@Serializable
-data class SkillMetadata(
-    val description: String = "",
-    @JsonNames("repoUrl")
-    val repositoryUrl: String,
-    val category: String = "",
-    val tags: String = "",
-    @JsonNames("version")
-    val version: String = ""
-)
-```
-
-用于 Skill 市场（GitHub Issue）发布和解析，存储在 Issue body 的 HTML 注释 `<!-- operit-skill-json: {...} -->` 中。
-
-### 12.4 Skill 的发现和注册
-
-#### 12.4.1 SkillManager — 核心发现引擎
-
-[SkillManager.kt](app/src/main/java/com/ai/assistance/operit/core/tools/skill/SkillManager.kt) 为单例模式，负责 Skill 的发现、加载、解析、删除。
-
-**存储位置**：`Downloads/Operit/skills/` 目录
-
-**发现流程**（`refreshAvailableSkills()`）：
-
-```
-1. 扫描 Downloads/Operit/skills/ 下的所有子目录
-2. 在每个子目录中查找 SKILL.md（优先大写，回退小写 skill.md）
-3. 解析 SKILL.md 的 YAML frontmatter 提取 name 和 description
-4. 如果 frontmatter 中没有 name/description
-   → 在前 40 行中继续搜索 key: value 格式
-5. 如果 name 仍为空 → 使用目录名作为 Skill 名称
-6. 检测重名冲突，记录到 skillLoadErrors
-7. 构建内存缓存 availableSkills: MutableMap<String, SkillPackage>
-```
-
-**元数据解析**（`parseSkillMetadata()`）：
-
-- 优先解析 YAML frontmatter（`---` 包围的区域）
-- 回退到前 40 行的 `key: value` 格式解析
-- 支持 `name` 和 `description` 两个关键字段
-
-**关键方法**：
-
-| 方法 | 返回类型 | 说明 |
-|------|---------|------|
-| `refreshAvailableSkills()` | Unit | 刷新内存缓存 |
-| `getAvailableSkills()` | Map<String, SkillPackage> | 获取所有可用 Skill（先刷新） |
-| `getAvailableSkillsSnapshot()` | Pair<Map, Map> | 获取 Skill + 错误信息快照 |
-| `readSkillContent(skillName)` | String? | 读取 SKILL.md 全文 |
-| `deleteSkill(skillName)` | Boolean | 删除 Skill 目录 |
-| `getSkillSystemPrompt(skillName)` | String? | 生成 AI 可用的系统提示词 |
-| `importSkillFromZip(zipFile, subDirPath?)` | String | 从 ZIP 导入 Skill |
-
-#### 12.4.2 SkillRepository — 数据仓库层
-
-[SkillRepository.kt](app/src/main/java/com/ai/assistance/operit/data/skill/SkillRepository.kt) 封装 SkillManager 并增加三种导入方式：
-
-**1. 从 ZIP 导入**（`importSkillFromZip`）
-
-```
-ZIP 文件 → 解压 → 查找 SKILL.md → 复制到 skills 目录
-```
-
-详细流程：
-
-1. 解压 ZIP 文件到临时目录
-2. 路径遍历防护（`canonicalFile` 检查，防止 ZIP path traversal 攻击）
-3. 支持指定 ZIP 内的子目录导入（`subDirPathInZip` 参数）
-4. 查找 `SKILL.md`（支持大小写容错，先查 `SKILL.md` 再查 `skill.md`）
-5. 复制到最终存储位置（`Downloads/Operit/skills/{skillName}/`）
-
-**2. 从 GitHub 仓库导入**（`importSkillFromGitHubRepo`）
-
-```
-GitHub URL → 解析 owner/repo/branch/subdir → 下载 ZIP → 调用 ZIP 导入
-→ 写入 .operit_repo_url 标记文件
-→ ZIP 缓存池管理（SkillRepoZipPoolManager）
-```
-
-支持的 GitHub URL 格式：
-- `github.com/owner/repo`
-- `github.com/owner/repo/tree/branch/subdir`
-- `github.com/owner/repo/blob/branch/path/to/SKILL.md`
-- `raw.githubusercontent.com/owner/repo/branch/...`
-
-**3. 直接输入导入**（`importSkillFromDirectInput`）
-
-```
-用户输入 ID/描述/内容 → 生成 SKILL.md → 可选附件存入 assets 子目录
-```
-
-#### 12.4.3 SkillRepoZipPoolManager — ZIP 缓存池
-
-```kotlin
-object SkillRepoZipPoolManager {
-    const val maxPoolSize = 6     // 最大缓存 6 个 ZIP 文件
-    // 基于 SHA-256 哈希生成文件名
-    // LRU 淘汰策略（按最后修改时间排序）
-    // Mutex 并发安全
-    // .download 临时文件 → 完成后原子重命名为 .zip
-}
-```
-
-### 12.5 Skill 的激活和执行
-
-#### 12.5.1 统一激活入口
-
-Skill 与 ToolPkg、MCP 共享 `use_package` 工具作为激活入口，PackageManager 按优先级查找：
-
-```
-use_package(package_name)
-    │
-    ├──► 1. 检查是否为 ToolPkg（JS 工具包） → 加载并注册工具
-    ├──► 2. 检查是否为 Skill → 生成系统提示词注入
-    ├──► 3. 检查是否为 MCP Server → 激活 MCP 连接
-    └──► 4. 都不匹配 → 返回 "Package not found"
-```
-
-#### 12.5.2 Skill 激活流程
-
-当 `use_package` 的 `package_name` 匹配到 Skill 时：
-
-```
-1. 可见性检查
-   SkillVisibilityPreferences.isSkillVisibleToAi(skillName)
-
-2. 生成系统提示词
-   SkillManager.getSkillSystemPrompt(skillName)
-
-3. 提示词注入到对话上下文
-```
-
-**`getSkillSystemPrompt()` 生成的提示词结构**：
-
-当 Skill 被激活时，`getSkillSystemPrompt()` 生成的提示词包含以下 6 个部分：
-
-1. **Skill 基本信息**：名称（`Using package (Skill): {skillName}`）、使用时间（`Use Time: {LocalDateTime.now()}`）
-2. **执行策略说明**：`Prioritize using the skill-provided instructions and bundled scripts, and complete tasks with terminal-related tools.`
-3. **SKILL.md 文件路径**：`SKILL.md path: {skill.skillFile.absolutePath}`
-4. **Skill 目录路径**：`Skill directory: {skill.directory.absolutePath}`
-5. **目录结构树**（`buildDirectoryTreeText`）：展示 Skill 目录下的所有文件和子目录
-6. **SKILL.md 完整内容**：注入 SKILL.md 的全部文本
-
-```
-Using package (Skill): {skillName}
-Use Time: {当前时间}
-Execution policy:
-Prioritize using the skill-provided instructions and bundled scripts,
-and complete tasks with terminal-related tools.
-Description: {description}
-SKILL.md path: {绝对路径}
-Skill directory: {目录绝对路径}
-Directory structure:
-{目录树文本}
-SKILL.md:
-{SKILL.md 完整内容}
-```
-
-关键特点：
-- Skill 激活后**不会注册新的工具**到 AIToolHandler，而是通过**系统提示词注入**方式让 AI 获知 Skill 的知识
-- 提示词中包含完整的目录结构，让 AI 知道 Skill 目录下有哪些可用脚本/资源
-- 执行策略明确指示 AI "优先使用 Skill 提供的指令和捆绑脚本，通过终端相关工具完成任务"
-
-### 12.6 AI 可见性机制
-
-#### 12.6.1 SkillVisibilityPreferences
-
-[SkillVisibilityPreferences.kt](app/src/main/java/com/ai/assistance/operit/data/preferences/SkillVisibilityPreferences.kt) 使用 SharedPreferences 存储每个 Skill 的 AI 可见性：
-
-```kotlin
-fun isSkillVisibleToAi(skillName: String): Boolean
-fun setSkillVisibleToAi(skillName: String, visible: Boolean)
-```
-
-- **存储键生成**：对 Skill 名称做 SHA-256 哈希，取前 16 位作为 key（`skill_visible_{hash16}`），避免特殊字符问题
-- **兼容性**：支持从旧版 key 格式自动迁移到新格式
-- **默认值**：新 Skill 默认对 AI 可见（`true`）
-- **不可见时的行为**：未设为可见的 Skill 在 `use_package` 时会返回提示：`"Skill 'xxx' is set to not show to AI"`
-
-#### 12.6.2 系统提示词中的 Skill 列表
-
-在构建系统提示词时，Skill 与 ToolPkg、MCP 一起被列在 "Available packages" 区域：
-
-```kotlin
-val skillPackages = SkillRepository.getInstance(context)
-    .getAiVisibleSkillPackages()
-    .filterKeys { skillName ->
-        allowedSkillNames?.contains(skillName) ?: true
-    }
-```
-
-AI 看到的格式：
-
-```
-Available packages:
-- packageName : description    (ToolPkg)
-- serverName : description     (MCP)
-- skillName : description      (Skill)
-```
-
-#### 12.6.3 角色卡访问控制
-
-角色卡通过 `allowedSkills` 白名单控制 Skill 访问权限：
-
-```kotlin
-data class CharacterCardToolAccessConfig(
-    val enabled: Boolean = false,
-    val allowedBuiltinTools: List<String> = emptyList(),
-    val allowedPackages: List<String> = emptyList(),
-    val allowedSkills: List<String> = emptyList(),       // Skill 白名单
-    val allowedMcpServers: List<String> = emptyList()
-)
-```
-
-运行时通过 `CharacterCardToolAccessResolver.isExternalSourceAllowed(sourceName)` 统一判断 Skill/Package/MCP 是否被当前角色卡允许。
-
-### 12.7 Skill 包结构
-
-#### 12.7.1 目录结构
-
-```
-Downloads/Operit/skills/
-└── {skillName}/              # Skill 目录（名称即 Skill ID）
-    ├── SKILL.md              # 必需：Skill 入口文件
-    ├── assets/               # 可选：附件目录（直接输入导入时创建）
-    │   ├── script.sh
-    │   └── config.json
-    ├── scripts/              # 可选：脚本目录
-    └── .operit_repo_url      # 可选：GitHub 来源标记文件
-```
-
-#### 12.7.2 SKILL.md 格式
-
-支持 YAML frontmatter：
-
-```markdown
----
-name: "My Skill"
-description: "A skill that does something useful"
----
-
-# My Skill
-
-Instructions for the AI...
-```
-
-Skill 使用 Markdown frontmatter 定义元数据（`---` 包围的 YAML 区域），系统通过解析前 40 行进行快速发现和扫描。如果 frontmatter 中未找到 `name`/`description`，系统会在前 40 行中继续搜索 `key: value` 格式。
-
-也支持简化的 `key: value` 格式（前 40 行内）：
-
-```markdown
-name: My Skill
-description: A skill that does something useful
-
-# Instructions...
-```
-
-#### 12.7.3 市场发布格式
-
-Skill 通过 GitHub Issue 发布到 `AAswordman/OperitSkillMarket` 仓库：
-
-```html
-<!-- operit-skill-json: {"description":"...","repositoryUrl":"...","category":"...","version":"v1"} -->
-<!-- operit-parser-version: v1 -->
-
-## Skill 信息
-{description}
-
-## 仓库信息
-- 仓库地址: {repositoryUrl}
-
-## 安装方法
-1. 打开 Operit
-2. 进入 Skill 配置页面
-3. 输入仓库地址: {repositoryUrl}
-4. 点击导入
-```
-
-### 12.8 CLI 模式下 Skill 的集成
-
-在 CLI 工具模式下，Skill 作为 `HiddenToolSourceKind.ACTIVATION` 类型的隐藏工具目录条目出现：
-
-```kotlin
-val skillPackages = SkillRepository.getInstance(context)
-    .getAiVisibleSkillPackages()
-    .filterKeys { roleCardToolAccess.isExternalSourceAllowed(it) }
-
-skillPackages.forEach { (skillName, skillPackage) ->
-    addActivationEntry(
-        entries = entries,
-        displayName = skillName,
-        description = skillPackage.description,
-        keywordTag = "skill",
-        sourceKind = HiddenToolSourceKind.ACTIVATION
-    )
-}
-```
-
-AI 需要先通过 `search` 工具发现 Skill，再通过 `proxy` 工具调用 `use_package` 来激活。
-
-### 12.9 Skill 生命周期流程图
-
-```mermaid
-flowchart TD
-    Create[创建/导入 Skill] --> Discover[SkillManager 发现注册]
-    Discover --> Visibility[AI 可见性配置]
-    Visibility --> ListInPrompt[系统提示词列举]
-    ListInPrompt --> AIActivate[AI 调用 use_package]
-    AIActivate --> CheckVisibility{可见性检查}
-    CheckVisibility -->|不可见| Denied[返回错误]
-    CheckVisibility -->|可见| GeneratePrompt[生成 Skill 系统提示词]
-    GeneratePrompt --> InjectContext[注入到对话上下文]
-    InjectContext --> AIExecute[AI 根据 Skill 指令<br/>自主使用终端工具完成任务]
-
-    Create --> |ZIP 导入| ImportZip[SkillRepository.importSkillFromZip]
-    Create --> |GitHub 导入| ImportGithub[SkillRepository.importSkillFromGitHubRepo]
-    Create --> |直接输入| ImportDirect[SkillRepository.importSkillFromDirectInput]
-
-    ImportZip --> Discover
-    ImportGithub --> Discover
-    ImportDirect --> Discover
-```
-
----
-
-## 十三、项目安全机制
-
-### 13.1 安全架构总览
-
-Operit 的安全机制采用**多层纵深防御**策略，从工具暴露、角色卡白名单、用户确认、权限分级到 Shell 执行安全，形成了一条完整的工具执行安全检查链：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          工具执行安全检查链                                    │
-│                                                                             │
-│  AI 响应 → 提取工具调用 → 安全检查链 → 执行                                  │
-│                                    │                                        │
-│                                    ├── 1. 工具暴露模式拦截 (ToolExposureMode)│
-│                                    ├── 2. 角色卡工具权限拦截 (RoleCard)       │
-│                                    ├── 3. 用户权限确认 (PermissionSystem)     │
-│                                    ├── 4. 参数验证 (validateParameters)       │
-│                                    └── 5. 安全执行 (executeToolSafely)        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          Shell 执行安全                                      │
-│  5 级权限体系：STANDARD → ACCESSIBILITY → DEBUGGER → ADMIN → ROOT            │
-│  严格模式：不降级，不可用则拒绝                                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          数据安全                                            │
-│  API Key 脱敏 + Key 池轮询 + DataStore 加密存储                               │
-│  SAF 文件访问 + URI 验证 + 路径规范化                                        │
-│  MCP 连接认证 + 进程隔离                                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          审计与监控                                          │
-│  AIToolHook 6 阶段生命周期通知 + ToolPkg 拦截/修改能力                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 13.2 工具执行安全检查链
-
-#### 13.2.1 第 1 层：工具暴露模式拦截
-
-根据 AI Provider 类型自动选择工具暴露模式：
-
-```kotlin
-enum class ToolExposureMode {
-    FULL,   // 云端 API：所有工具直接暴露
-    CLI;    // 本地推理：只暴露 search + proxy
-
-    companion object {
-        fun resolve(providerType: ApiProviderType): ToolExposureMode {
-            return when (providerType) {
-                LMSTUDIO, OLLAMA, OPENAI_LOCAL, MNN, LLAMA_CPP -> CLI
-                else -> FULL
-            }
-        }
-    }
-}
-```
-
-CLI 模式下，所有真实工具隐藏在 `proxy` 后面，模型必须先 `search` 发现工具，再通过 `proxy` 代理执行，防止本地模型因工具列表过长而混乱。
-
-**拦截逻辑**：
-
-```kotlin
-for (invocation in invocations) {
-    val deniedResult = buildToolExposureDeniedResult(context, invocation, toolExposureMode)
-    if (deniedResult == null) {
-        toolExposurePermittedInvocations.add(invocation)
-    } else {
-        toolExposureDeniedResults.add(deniedResult)
-    }
-}
-```
-
-#### 13.2.2 第 2 层：角色卡工具白名单拦截
-
-角色卡通过四维白名单控制工具访问：
-
-```kotlin
-data class CharacterCardToolAccessConfig(
-    val enabled: Boolean = false,                     // 是否启用自定义白名单
-    val allowedBuiltinTools: List<String> = emptyList(), // 允许的内置工具
-    val allowedPackages: List<String> = emptyList(),     // 允许的 Package
-    val allowedSkills: List<String> = emptyList(),       // 允许的 Skill
-    val allowedMcpServers: List<String> = emptyList()    // 允许的 MCP 服务器
-)
-```
-
-**解析逻辑**（[CharacterCardToolAccessResolver.kt](app/src/main/java/com/ai/assistance/operit/data/preferences/CharacterCardToolAccessResolver.kt)）：
-
-1. 如果角色卡未启用自定义白名单（`enabled=false`），则允许所有工具
-2. 如果启用，则将全局可见性与角色卡白名单取**交集**
-3. 如果 `use_package` 工具被禁止，则所有外部源（Package/Skill/MCP）也被禁止
-4. 外部源过滤：只保留角色卡白名单中明确允许的 Package/Skill/MCP
-
-**运行时拦截**：
-
-```kotlin
-for (invocation in toolExposurePermittedInvocations) {
-    val deniedResult = if (roleCardToolAccess?.customEnabled == true &&
-        !isInvocationAllowedForRoleCard(invocation, roleCardToolAccess)
-    ) {
-        buildRoleCardDeniedResult(context, invocation)
-    } else {
-        null
-    }
-}
-```
-
-`isInvocationAllowedForRoleCard()` 对不同工具名格式分别处理：
-
-| 工具名格式 | 判断逻辑 |
-|-----------|---------|
-| `search` | 始终允许 |
-| `proxy` | 检查其代理的实际目标工具 |
-| `use_package` | 检查白名单 + 检查包名是否在允许列表 |
-| `package_proxy` | 类似 proxy 的检查 |
-| `pkg:tool` 格式 | 提取包名检查是否在允许列表 |
-| 普通内置工具 | 检查 `isBuiltinToolAllowed()` |
-
-#### 13.2.3 第 3 层：用户权限确认
-
-[ToolPermissionSystem.kt](app/src/main/java/com/ai/assistance/operit/ui/permissions/ToolPermissionSystem.kt) 实现三级权限控制：
-
-```kotlin
-enum class PermissionLevel {
-    ALLOW,      // 自动允许，不询问
-    ASK,        // 每次都询问用户
-    FORBID;     // 永远禁止
-}
-```
-
-**检查流程**：
-
-```
-checkToolPermission()
-    │
-    ├──► 1. 读取 DataStore 中的主开关（master switch）
-    ├──► 2. 读取工具特定覆盖（优先于主开关）
-    ├──► 3. ALLOW → 直接放行
-    ├──► 4. FORBID → 直接拒绝
-    └──► 5. ASK → 弹出悬浮窗确认
-```
-
-**用户确认弹窗**（[PermissionRequestOverlay.kt](app/src/main/java/com/ai/assistance/operit/ui/permissions/PermissionRequestOverlay.kt)）：
-
-- 使用系统悬浮窗（`TYPE_APPLICATION_OVERLAY`）显示 Compose UI
-- 提供三个选项：允许（ALLOW）、拒绝（DENY）、始终允许（ALWAYS_ALLOW）
-- 60 秒超时自动拒绝
-- 选择"始终允许"会持久化到 DataStore
-
-**deny_tool 标记**：如果工具调用的原始文本包含 `deny_tool`，则跳过权限检查直接放行（用于内部工具调用）。
-
-#### 13.2.4 第 4 层：参数验证与安全执行
-
-```kotlin
-fun executeToolSafely(invocation, executor, toolHandler): Flow<ToolResult> {
-    val validationResult = executor.validateParameters(invocation.tool)
-    if (!validationResult.valid) {
-        return flow { emit(ToolResult(error = "Invalid parameters: ...")) }
-    }
-    return executor.invokeAndStream(invocation.tool).catch { e -> ... }
-}
-```
-
-#### 13.2.5 完整安全检查链流程图
-
-```mermaid
-flowchart TD
-    AIResponse[AI 响应] --> Extract[提取工具调用]
-    Extract --> Layer1{第1层: 工具暴露模式}
-
-    Layer1 -->|FULL: 允许| Layer2
-    Layer1 -->|CLI: 非白名单工具| Deny1[拒绝: 工具不在暴露列表]
-
-    Layer2{第2层: 角色卡白名单} -->|白名单允许| Layer3
-    Layer2 -->|白名单禁止| Deny2[拒绝: 角色卡不允许该工具]
-
-    Layer3{第3层: 用户权限确认} -->|ALLOW| Execute
-    Layer3 -->|FORBID| Deny3[拒绝: 用户禁止该工具]
-    Layer3 -->|ASK| Confirm[弹出确认窗口]
-
-    Confirm -->|用户允许| Execute
-    Confirm -->|用户拒绝| Deny3
-    Confirm -->|超时| Deny3
-
-    Execute{第4层: 参数验证} -->|验证通过| SafeExec[安全执行工具]
-    Execute -->|验证失败| Deny4[拒绝: 参数无效]
-
-    SafeExec --> Result[返回工具结果]
-```
-
-### 13.3 Shell 命令执行安全
-
-#### 13.3.1 五级权限体系
-
-```kotlin
-enum class AndroidPermissionLevel {
-    STANDARD,      // 普通应用权限
-    ACCESSIBILITY, // 无障碍服务权限
-    DEBUGGER,      // 调试权限
-    ADMIN,         // 管理员权限（Shizuku）
-    ROOT;          // Root 权限
-}
-```
-
-#### 13.3.2 Shell 执行器工厂
-
-```kotlin
-fun getExecutor(context: Context, permissionLevel: AndroidPermissionLevel): ShellExecutor {
-    return when (permissionLevel) {
-        ROOT -> RootShellExecutor(context)
-        ADMIN -> AdminShellExecutor(context)
-        DEBUGGER -> DebuggerShellExecutor(context)
-        ACCESSIBILITY -> AccessibilityShellExecutor(context)
-        STANDARD -> StandardShellExecutor(context)
-    }
-}
-```
-
-关键安全机制：
-- **严格模式**：使用用户首选权限级别，如果该级别不可用则直接拒绝，**不做降级**
-- **权限验证**：每次执行前检查 `executor.isAvailable() && permStatus.granted`
-- **缓存隔离**：每个权限级别有独立的执行器缓存
-
-#### 13.3.3 Root 权限管理
-
-[RootAuthorizer.kt](app/src/main/java/com/ai/assistance/operit/core/tools/system/RootAuthorizer.kt) 采用多策略检测：
-
-| 检测策略 | 方法 | 说明 |
-|---------|------|------|
-| libsu 检测 | `Shell.isAppGrantedRoot()` | Magisk 标准 Root 授权检测 |
-| KernelSU 检测 | 执行 `su --version` | 检查输出是否包含 "KernelSU" |
-| 文件系统检测 | 检查 `/system/bin/su` 等路径 | 传统 su 二进制文件检测 |
-| which 命令检测 | `which su` | PATH 环境变量中的 su |
-
-[RootShellExecutor.kt](app/src/main/java/com/ai/assistance/operit/core/tools/system/shell/RootShellExecutor.kt) 支持两种执行模式：
-
-| 模式 | 方法 | 适用场景 |
-|------|------|---------|
-| libsu 模式 | `Shell.cmd(command).exec()` | Magisk（默认） |
-| exec 模式 | `Runtime.getRuntime().exec("su -c command")` | KernelSU 等 |
-
-Shell 身份区分：
-
-```kotlin
-enum class ShellIdentity {
-    DEFAULT,   // 默认
-    APP,       // 应用身份
-    ROOT,      // Root 身份
-    SHELL      // Shell 身份（通过 operit_shell_exec launcher 执行）
-}
-```
-
-`SHELL` 身份使用专用的 `operit_shell_exec` 二进制 launcher，从 assets 复制到本地并设置可执行权限，确保在 Root 环境下以 shell 用户身份执行命令。
-
-### 13.4 文件访问安全
-
-#### 13.4.1 SAF（Storage Access Framework）安全机制
-
-[SafFileSystemTools.kt](app/src/main/java/com/ai/assistance/operit/core/tools/defaultTool/standard/SafFileSystemTools.kt) 实现了多层文件访问安全：
-
-| 安全层 | 机制 | 说明 |
-|--------|------|------|
-| **书签绑定** | `environment="repo:<bookmarkName>"` | 文件操作必须指定 SAF 书签 |
-| **URI 验证** | `resolveSafPathToDocumentUriOrNull()` | 所有路径解析为 content:// URI |
-| **权限继承** | 持久化 URI 权限 | 来自用户在系统文件选择器中授予的权限 |
-| **路径规范化** | `normalizeAbsolutePath()` | 防止路径遍历攻击 |
-| **文件大小限制** | `MAX_FILE_READ_BYTES` | 限制读取大小 |
-| **二进制文件保护** | `FileUtils.isTextLike()` | 防止将二进制文件作为文本读取 |
-
-#### 13.4.2 DocumentProvider 安全
-
-- `WorkspaceDocumentsProvider` 和 `MemoryDocumentsProvider` 都要求 `android.permission.MANAGE_DOCUMENTS` 权限
-- `android:exported="true"` + `android:grantUriPermissions="true"` 允许受控的跨应用访问
-
-### 13.5 API Key 安全管理
-
-[ApiKeyProvider.kt](app/src/main/java/com/ai/assistance/operit/api/chat/llmprovider/ApiKeyProvider.kt) 实现 API Key 的安全管理：
-
-| 安全特性 | 实现方式 |
-|---------|---------|
-| **日志脱敏** | `apiKey.take(4)...apiKey.takeLast(4)` 只显示首尾 4 位 |
-| **Key 池轮询** | `MultiApiKeyProvider` 支持多 Key 轮询，避免单 Key 过度使用 |
-| **可用性过滤** | 已测试为不可用的 Key 会被自动跳过 |
-| **Mutex 保护** | Key 选择过程使用 `Mutex` 保证线程安全 |
-| **存储方式** | API Key 存储在 DataStore（基于 SharedPreferences） |
-
-```kotlin
-interface ApiKeyProvider {
-    suspend fun getApiKey(): String
-}
-
-class SingleApiKeyProvider(private val apiKey: String) : ApiKeyProvider
-class MultiApiKeyProvider(configId, modelConfigManager) : ApiKeyProvider
-```
-
-### 13.6 MCP 连接安全
-
-MCP 连接安全机制：
-
-| 安全层 | 机制 | 说明 |
-|--------|------|------|
-| **服务注册验证** | 必须提供 `name` 和 `type` | 本地服务必须有 `command`，远程服务必须有 `endpoint` |
-| **远程连接认证** | `bearerToken` + 自定义 `headers` | 支持多种认证方式 |
-| **进程隔离** | 独立 helper 进程 | 每个 MCP 服务运行在独立进程中，通过 IPC 通信 |
-| **工具缓存** | `mcpToolsMap` | 未激活的服务无法获取工具列表 |
-
-```javascript
-registerService(name, info) {
-    if (!name || !info.type) return false;
-    if (info.type === 'local' && !info.command) return false;
-    if (info.type === 'remote' && !info.endpoint) return false;
-    const serviceInfo = {
-        bearerToken: info.bearerToken,
-        headers: info.headers,
-    };
-}
-```
-
-### 13.7 工具生命周期审计
-
-[AIToolHook.kt](app/src/main/java/com/ai/assistance/operit/core/tools/AIToolHook.kt) 提供完整的工具执行生命周期追踪：
-
-```kotlin
-interface AIToolHook {
-    fun onToolCallRequested(tool: AITool)           // 工具调用请求
-    fun onToolPermissionChecked(tool: AITool, granted: Boolean, reason: String?)  // 权限检查结果
-    fun onToolExecutionStarted(tool: AITool)        // 执行开始
-    fun onToolExecutionResult(tool: AITool, result: ToolResult)  // 执行结果
-    fun onToolExecutionError(tool: AITool, throwable: Throwable) // 执行异常
-    fun onToolExecutionFinished(tool: AITool)       // 执行完成
-}
-```
-
-ToolPkg 可以通过 `ToolPkgToolLifecycleBridge` 拦截和修改工具行为，实现自定义安全策略。
-
-### 13.8 安全架构总览表
-
-| 安全层 | 拦截点 | 核心机制 | 关键文件 |
-|--------|--------|----------|----------|
-| **工具暴露模式** | 工具列表生成 | FULL/CLI 双模式 | CliToolModeSupport.kt |
-| **角色卡白名单** | 工具调用前 | 四维白名单（内置/Package/Skill/MCP） | CharacterCardToolAccessResolver.kt |
-| **用户确认** | 工具执行前 | ALLOW/ASK/FORBID 三级 | ToolPermissionSystem.kt |
-| **参数验证** | 工具执行时 | executor.validateParameters() | ToolExecutionManager.kt |
-| **Shell 权限分级** | Shell 命令执行 | 5 级权限体系，严格模式不降级 | ShellExecutorFactory.kt |
-| **Root 管理** | Root 命令执行 | 多策略检测，libsu/exec 双模式 | RootAuthorizer.kt |
-| **SAF 文件访问** | 文件操作 | 书签绑定 + URI 验证 + 路径规范化 | SafFileSystemTools.kt |
-| **API Key** | 网络请求 | 日志脱敏 + Key 池轮询 + 可用性过滤 | ApiKeyProvider.kt |
-| **MCP 安全** | MCP 连接 | bearerToken + headers 认证 + 进程隔离 | bridge/index.js |
-| **审计钩子** | 全生命周期 | 6 阶段通知链 | AIToolHook.kt |
-
----
-
-## 十四、完整架构图（Mermaid）
+## 十一、完整架构图（Mermaid）
 
 ```mermaid
 flowchart TB
@@ -4031,7 +2123,7 @@ flowchart TB
     subgraph Session["会话管理"]
         ChatCore["ChatServiceCore"]
         RuntimeHolder["ChatRuntimeHolder"]
-        Delegates["7 Delegates"]
+        Delegates["6 Delegates"]
     end
 
     subgraph Orchestrator["编排层 (EnhancedAIService)"]
@@ -4124,7 +2216,7 @@ flowchart TB
 
 ---
 
-## 十五、ReAct 循环完整流程图
+## 十二、ReAct 循环完整流程图
 
 ```mermaid
 sequenceDiagram
@@ -4164,7 +2256,7 @@ sequenceDiagram
 
 ---
 
-## 十六、PhoneAgent 执行流程图
+## 十三、PhoneAgent 执行流程图
 
 ```mermaid
 sequenceDiagram
@@ -4198,7 +2290,7 @@ sequenceDiagram
 
 ---
 
-## 十七、关键文件路径索引
+## 十四、关键文件路径索引
 
 | 文件 | 路径 | 职责 |
 |------|------|------|
@@ -4206,14 +2298,17 @@ sequenceDiagram
 | ChatRuntimeHolder.kt | `api/chat/ChatRuntimeHolder.kt` | 运行时槽位管理 |
 | ChatRuntimeSlot.kt | `api/chat/ChatRuntimeSlot.kt` | MAIN/FLOATING 枚举 |
 | MultiServiceManager.kt | `api/chat/enhance/MultiServiceManager.kt` | 多模型功能路由 |
-| ConversationService.kt | `api/chat/enhance/ConversationService.kt` | 对话管理 |
+| ConversationService.kt | `api/chat/enhance/ConversationService.kt` | 对话历史准备与 XML 标签拆分 |
 | ToolExecutionManager.kt | `api/chat/enhance/ToolExecutionManager.kt` | 工具执行管理 |
 | FileBindingService.kt | `api/chat/enhance/FileBindingService.kt` | 文件绑定 |
 | ConversationRoundManager.kt | `api/chat/enhance/ConversationRoundManager.kt` | 轮次管理 |
 | InputProcessor.kt | `api/chat/enhance/InputProcessor.kt` | 输入处理 |
+| MemoryLibrary.kt | `api/chat/library/MemoryLibrary.kt` | 记忆系统核心智能层（知识图谱提取） |
+| MemoryAutoSaveScheduler.kt | `api/chat/library/MemoryAutoSaveScheduler.kt` | 记忆自动保存调度器 |
 | AIToolHandler.kt | `core/tools/AIToolHandler.kt` | 工具注册/执行/自动激活路由 |
 | AIToolHook.kt | `core/tools/AIToolHook.kt` | 工具生命周期钩子 |
 | ToolRegistration.kt | `core/tools/ToolRegistration.kt` | 80+ 工具注册（含 SubAgent） |
+| MemoryQueryToolExecutor.kt | `core/tools/defaultTool/standard/MemoryQueryToolExecutor.kt` | 记忆工具统一执行器（11 个工具） |
 | PhoneAgent.kt | `core/tools/agent/PhoneAgent.kt` | 视觉 UI Agent |
 | ShowerController.kt | `core/tools/agent/ShowerController.kt` | 虚拟屏控制 |
 | MCPToolExecutor.kt | `core/tools/mcp/MCPToolExecutor.kt` | MCP 工具执行与路由 |
@@ -4223,34 +2318,45 @@ sequenceDiagram
 | JsToolManager.kt | `core/tools/javascript/JsToolManager.kt` | JS 工具名解析 |
 | CliToolModeSupport.kt | `core/tools/climode/CliToolModeSupport.kt` | CLI 模式 search+proxy |
 | PromptHookRegistry.kt | `core/chat/hooks/PromptHookRegistry.kt` | 7 阶段提示钩子 |
-| SystemPromptConfig.kt | `core/config/SystemPromptConfig.kt` | 系统提示词 |
+| SystemPromptConfig.kt | `core/config/SystemPromptConfig.kt` | 系统提示词动态构建 |
 | SystemToolPrompts.kt | `core/config/SystemToolPrompts.kt` | 工具分类与提示词 |
 | SystemToolPromptsInternal.kt | `core/config/SystemToolPromptsInternal.kt` | 内部工具提示词 |
-| FunctionalPrompts.kt | `core/config/FunctionalPrompts.kt` | 功能提示词（UI_CONTROLLER 等） |
+| FunctionalPrompts.kt | `core/config/FunctionalPrompts.kt` | 功能提示词（UI_CONTROLLER / 知识图谱提取） |
 | FunctionType.kt | `data/model/FunctionType.kt` | 功能类型枚举（10 种） |
 | ChatMarkupRegex.kt | `util/ChatMarkupRegex.kt` | 工具调用正则匹配 |
-| SkillManager.kt | `core/tools/skill/SkillManager.kt` | Skill 发现/加载/解析/删除 |
-| SkillRepository.kt | `data/skill/SkillRepository.kt` | Skill 数据仓库（ZIP/GitHub/直接输入导入） |
-| SkillVisibilityPreferences.kt | `data/preferences/SkillVisibilityPreferences.kt` | Skill AI 可见性控制 |
-| SkillRepoZipPoolManager.kt | `util/SkillRepoZipPoolManager.kt` | GitHub ZIP 缓存池 |
-| ToolPermissionSystem.kt | `ui/permissions/ToolPermissionSystem.kt` | 工具权限确认系统 |
-| PermissionRequestOverlay.kt | `ui/permissions/PermissionRequestOverlay.kt` | 权限确认悬浮窗 |
+| ChatServiceCore.kt | `services/ChatServiceCore.kt` | 聊天服务核心（6 Delegates 组合） |
+| MessageCoordinationDelegate.kt | `services/core/MessageCoordinationDelegate.kt` | 消息协调（总结/续聊/群组编排） |
+| MessageProcessingDelegate.kt | `services/core/MessageProcessingDelegate.kt` | 消息处理（流式收集/工具循环） |
+| ChatHistoryDelegate.kt | `services/core/ChatHistoryDelegate.kt` | 聊天历史管理 |
+| AttachmentDelegate.kt | `services/core/AttachmentDelegate.kt` | 附件管理（含记忆文件夹注入） |
+| ApiConfigDelegate.kt | `services/core/ApiConfigDelegate.kt` | API 配置管理 |
+| TokenStatisticsDelegate.kt | `services/core/TokenStatisticsDelegate.kt` | Token 统计 |
+| AIMessageManager.kt | `core/chat/AIMessageManager.kt` | AI 消息管理（响应流准备/取消） |
+| ChatMessage.kt | `data/model/ChatMessage.kt` | 核心消息实体 |
+| ChatHistory.kt | `data/model/ChatHistory.kt` | 聊天历史 DTO |
+| ChatEntity.kt | `data/model/ChatEntity.kt` | Room 聊天实体 |
+| MessageEntity.kt | `data/model/MessageEntity.kt` | Room 消息实体 |
+| MessageVariantEntity.kt | `data/model/MessageVariantEntity.kt` | 消息变体实体 |
+| PromptTurn.kt | `core/chat/hooks/PromptTurn.kt` | 对话轮次抽象 |
+| CharacterCard.kt | `data/model/CharacterCard.kt` | 角色卡实体 |
+| CharacterCardManager.kt | `data/preferences/CharacterCardManager.kt` | 角色卡管理器 |
 | CharacterCardToolAccessResolver.kt | `data/preferences/CharacterCardToolAccessResolver.kt` | 角色卡工具白名单解析 |
-| ShellExecutorFactory.kt | `core/tools/system/shell/ShellExecutorFactory.kt` | Shell 执行器工厂 |
-| RootAuthorizer.kt | `core/tools/system/RootAuthorizer.kt` | Root 权限检测 |
-| RootShellExecutor.kt | `core/tools/system/shell/RootShellExecutor.kt` | Root Shell 执行器 |
-| SafFileSystemTools.kt | `core/tools/defaultTool/standard/SafFileSystemTools.kt` | SAF 文件系统工具 |
-| ApiKeyProvider.kt | `api/chat/llmprovider/ApiKeyProvider.kt` | API Key 安全管理 |
-| MessageProcessingDelegate.kt | `services/core/MessageProcessingDelegate.kt` | 消息流式处理委托 |
-| ChatHistoryDelegate.kt | `services/core/ChatHistoryDelegate.kt` | 聊天历史管理委托 |
-| ApiConfigDelegate.kt | `services/core/ApiConfigDelegate.kt` | API配置委托 |
-| TokenStatisticsDelegate.kt | `services/core/TokenStatisticsDelegate.kt` | Token统计委托 |
-| AttachmentDelegate.kt | `services/core/AttachmentDelegate.kt` | 附件处理委托 |
-| UiStateDelegate.kt | `ui/features/chat/viewmodel/UiStateDelegate.kt` | UI状态委托 |
-| MessageCoordinationDelegate.kt | `services/core/MessageCoordinationDelegate.kt` | 消息协调委托 |
+| ChatHistoryManager.kt | `data/repository/ChatHistoryManager.kt` | 聊天历史中央仓库 |
+| Memory.kt | `data/model/Memory.kt` | 记忆实体（ObjectBox） |
+| MemoryLink.kt | `data/model/Memory.kt` | 记忆关联实体 |
+| MemoryTag.kt | `data/model/Memory.kt` | 记忆标签实体 |
+| DocumentChunk.kt | `data/model/DocumentChunk.kt` | 文档分块实体 |
+| MemoryAutoSaveCandidate.kt | `data/model/MemoryAutoSaveCandidate.kt` | 自动保存候选实体 |
+| MemorySearchConfig.kt | `data/model/MemorySearchConfig.kt` | 搜索配置与权重 |
+| MemoryRepository.kt | `data/repository/MemoryRepository.kt` | 记忆系统核心存储层 |
+| MemoryAutoSaveCandidateRepository.kt | `data/repository/MemoryAutoSaveCandidateRepository.kt` | 自动保存候选队列 |
+| ObjectBoxManager.kt | `data/db/ObjectBox.kt` | ObjectBox 数据库管理 |
+| CloudEmbeddingService.kt | `services/CloudEmbeddingService.kt` | 云端 Embedding 生成 |
+| VectorIndexManager.kt | `util/vector/VectorIndexManager.kt` | HNSW 向量索引管理 |
+| TokenCacheManager.kt | `util/TokenCacheManager.kt` | Token 计数缓存 |
 
 ---
 
-*文档生成时间: 2026-05-15*
+*文档生成时间: 2026-05-14*
 *基于 Operit AI 项目代码深度分析*
 *意图路由机制章节参考：Operit Agent 意图路由机制详解.md*
