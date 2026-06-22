@@ -21,9 +21,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CodeOff
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.ai.assistance.operit.ui.components.CustomScaffold
@@ -51,10 +53,15 @@ import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
+import com.ai.assistance.operit.data.preferences.WaifuPreferences
 import com.ai.assistance.operit.ui.components.ErrorDialog
 import com.ai.assistance.operit.ui.features.chat.components.*
 import com.ai.assistance.operit.ui.features.chat.components.style.input.agent.AgentChatInputSection
 import com.ai.assistance.operit.ui.features.chat.components.style.input.classic.ClassicChatInputSection
+import com.ai.assistance.operit.ui.features.chat.components.style.input.common.ChatInputEvents
+import com.ai.assistance.operit.ui.features.chat.components.style.input.common.ChatInputHookContext
+import com.ai.assistance.operit.ui.features.chat.components.style.input.common.ChatInputHookRegistry
+import com.ai.assistance.operit.ui.features.chat.components.style.input.common.ChatInputSubmitActions
 import com.ai.assistance.operit.ui.features.chat.components.style.input.classic.ClassicChatSettingsBar
 import com.ai.assistance.operit.ui.features.chat.components.style.input.common.PendingQueueMessageItem
 import com.ai.assistance.operit.ui.features.chat.components.style.bubble.BubbleImageStyleConfig
@@ -63,8 +70,9 @@ import com.ai.assistance.operit.ui.features.chat.components.ExportCompleteDialog
 import com.ai.assistance.operit.ui.features.chat.components.ExportPlatformDialog
 import com.ai.assistance.operit.ui.features.chat.components.ExportProgressDialog
 import com.ai.assistance.operit.ui.features.chat.components.WindowsExportDialog
+import com.ai.assistance.operit.ui.features.chat.webview.MentionSuggestionPanelStyle
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceScreen
-import com.ai.assistance.operit.ui.features.chat.webview.WorkspaceFileSelector
+import com.ai.assistance.operit.ui.features.chat.webview.MentionSuggestionPanel
 import com.ai.assistance.operit.ui.features.chat.webview.computer.ComputerScreen
 import com.ai.assistance.operit.ui.features.chat.util.ConfigurationStateHolder
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
@@ -96,6 +104,10 @@ import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatHistoryDisplayMode
 import com.ai.assistance.operit.ui.theme.getTextColorForBackground
+import com.ai.assistance.operit.plugins.chatview.ChatViewEvent
+import com.ai.assistance.operit.plugins.chatview.ChatViewHookParams
+import com.ai.assistance.operit.plugins.chatview.ChatViewHookPluginRegistry
+import java.util.UUID
 
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -128,7 +140,8 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // Monitor shared files from external apps
     val sharedFiles by SharedFileHandler.sharedFiles.collectAsState()
-    val sharedLinks by SharedFileHandler.sharedLinks.collectAsState()
+    val sharedFileText by SharedFileHandler.sharedFileText.collectAsState()
+    val sharedText by SharedFileHandler.sharedText.collectAsState()
 
     // 添加麦克风权限请求启动器
     val requestMicrophonePermissionLauncher =
@@ -312,6 +325,48 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     val hasNewerDisplayHistory by actualViewModel.hasNewerDisplayHistory.collectAsState()
     val isLoadingDisplayWindow by actualViewModel.isLoadingDisplayWindow.collectAsState()
     val popupMessage by actualViewModel.popupMessage.collectAsState()
+    val chatViewRuntime = if (isFloatingMode) "floating" else "main"
+    val chatViewId = rememberSaveable { UUID.randomUUID().toString() }
+    val currentChatView = remember(chatHistories, currentChatId) {
+        chatHistories.find { it.id == currentChatId }
+    }
+    val latestChatViewParams by rememberUpdatedState(
+        ChatViewHookParams(
+            context = context,
+            viewId = chatViewId,
+            chatId = currentChatId,
+            workspacePath = currentChatView?.workspace,
+            workspaceEnv = currentChatView?.workspaceEnv,
+            runtime = chatViewRuntime,
+            title = currentChatView?.title
+        )
+    )
+    var hasDispatchedChatViewOpen by remember(chatViewId) { mutableStateOf(false) }
+    LaunchedEffect(
+        chatViewId,
+        currentChatId,
+        currentChatView?.workspace,
+        currentChatView?.workspaceEnv,
+        currentChatView?.title,
+        chatViewRuntime
+    ) {
+        val event =
+            if (hasDispatchedChatViewOpen) {
+                ChatViewEvent.VIEW_UPDATED
+            } else {
+                hasDispatchedChatViewOpen = true
+                ChatViewEvent.VIEW_OPENED
+            }
+        ChatViewHookPluginRegistry.dispatchAsync(event, latestChatViewParams)
+    }
+    DisposableEffect(chatViewId) {
+        onDispose {
+            ChatViewHookPluginRegistry.dispatchAsync(
+                ChatViewEvent.VIEW_CLOSED,
+                latestChatViewParams
+            )
+        }
+    }
     // 收集滚动事件
     val scrollToBottomEvent = actualViewModel.scrollToBottomEvent
     // 从ViewModel收集新的状态
@@ -368,13 +423,14 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     SharedIncomingContentHandler(
         sharedFiles = sharedFiles,
-        sharedLinks = sharedLinks,
+        sharedFileText = sharedFileText,
+        sharedText = sharedText,
         chatHistories = chatHistories,
         currentChatId = currentChatId,
         onHandleSharedFiles = actualViewModel::handleSharedFiles,
-        onHandleSharedLinks = actualViewModel::handleSharedLinks,
+        onHandleSharedText = actualViewModel::handleSharedText,
         onClearSharedFiles = SharedFileHandler::clearSharedFiles,
-        onClearSharedLinks = SharedFileHandler::clearSharedLinks
+        onClearSharedText = SharedFileHandler::clearSharedText
     )
 
     val pendingChatDraft by PendingChatDraftHandler.pendingDraft.collectAsState()
@@ -531,9 +587,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
     }
 
-    // Modern chat UI colors - Cursor风格
-    val backgroundColor =
-            if (effectiveHasBackgroundImage) Color.Transparent else MaterialTheme.colorScheme.background
     val defaultUserMessageColor = MaterialTheme.colorScheme.primaryContainer
     val defaultAiMessageColor = MaterialTheme.colorScheme.surface
     val cursorCustomUserMessageColor = cursorUserBubbleColorValue?.let(::Color)
@@ -787,6 +840,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
     val shouldUseGlobalImePadding = !shouldUseChatLocalImeHandling
+    val hasBoundWorkspace = !currentChatView?.workspace.isNullOrBlank()
 
     SideEffect {
         if (isCurrentScreen) {
@@ -798,7 +852,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // 当showWebView或showAiComputer状态改变时，更新TopAppBar的actions
     // 使用DisposableEffect确保当AIChatScreen离开组合时，actions被清空
-    LaunchedEffect(isCurrentScreen, showWebView, showAiComputer, isWorkspacePreparing, appBarContentColor) {
+    LaunchedEffect(isCurrentScreen, showWebView, showAiComputer, isWorkspacePreparing, appBarContentColor, hasBoundWorkspace) {
         if (isCurrentScreen) {
             setTopBarActions {
                 // AI电脑模式切换按钮
@@ -832,8 +886,12 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         )
                     } else {
                         Icon(
-                                imageVector = Icons.Default.Code,
-                                contentDescription = stringResource(R.string.code_editor),
+                                imageVector =
+                                if (hasBoundWorkspace) Icons.Default.Code
+                                else Icons.Default.CodeOff,
+                                contentDescription =
+                                if (hasBoundWorkspace) stringResource(R.string.workspace)
+                                else stringResource(R.string.setup_workspace),
                                 tint =
                                 if (showWebView) MaterialTheme.colorScheme.primaryContainer
                                 else appBarContentColor
@@ -873,11 +931,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             0f
         }
     val chatViewportTranslationYPx = inputBarTranslationYPx
-    val inputSurfaceColor = when {
-        chatInputTransparent -> colorScheme.surface.copy(alpha = 0f)
-        effectiveHasBackgroundImage -> colorScheme.surface.copy(alpha = 0.85f)
-        else -> colorScheme.surface
-    }
     Box(modifier = Modifier.fillMaxSize()) {
         CustomScaffold(
                 containerColor = Color.Transparent,
@@ -1012,15 +1065,17 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                                     .graphicsLayer {
                                                         translationY = -inputBarTranslationYPx
                                                     },
+                                    currentChatId = currentChatId,
                                     featureStates = featureStates,
                                     onToggleFeature = { featureKey ->
                                         actualViewModel.toggleFeature(featureKey)
                                     },
+                                    inputMenuRuntime = chatViewRuntime,
                                     permissionLevel =
                                             actualViewModel.masterPermissionLevel
                                                     .collectAsState()
                                                     .value,
-                                    onTogglePermission = { actualViewModel.toggleMasterPermission() },
+                                    onSetPermissionLevel = actualViewModel::setMasterPermissionLevel,
                                     enableThinkingMode = enableThinkingMode,
                                     onToggleThinkingMode = { actualViewModel.toggleThinkingMode() },
                                     thinkingQualityLevel = thinkingQualityLevel,
@@ -1072,9 +1127,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                     onManualMemoryUpdate = {
                                         actualViewModel.manuallyUpdateMemory()
                                     },
-                                    onManualSummarizeConversation = {
-                                        actualViewModel.manuallySummarizeConversation()
-                                    },
                                     characterCardBoundChatModelConfigId = characterCardBoundChatModelConfigId,
                                     characterCardBoundChatModelIndex = characterCardBoundChatModelIndex,
                                     characterCardBoundMemoryProfileId = characterCardBoundMemoryProfileId
@@ -1095,6 +1147,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 actualViewModel = actualViewModel,
                                 inputStyle = inputStyle,
                                 currentChatId = currentChatId,
+                                inputMenuRuntime = chatViewRuntime,
                                 enableEnterToSend = enableEnterToSend,
                                 isLoading = isLoading,
                                 inputState = inputProcessingState,
@@ -1199,10 +1252,18 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             }
         }
 
-        WorkspaceFileSelectorOverlay(
+        MentionSuggestionOverlay(
             actualViewModel = actualViewModel,
             bottomBarHeightPx = bottomBarHeightPx,
-            backgroundColor = inputSurfaceColor,
+            inputBarTranslationYPx = inputBarTranslationYPx,
+            panelStyle =
+                MentionSuggestionPanelStyle(
+                    hasBackgroundImage = effectiveHasBackgroundImage,
+                    chatInputTransparent = chatInputTransparent,
+                    chatInputFloating = chatInputFloating,
+                    chatInputLiquidGlass = chatInputLiquidGlass,
+                    chatInputWaterGlass = chatInputWaterGlass,
+                ),
         )
 
         val workspaceOverlayModifier =
@@ -1477,6 +1538,7 @@ private fun ChatInputBottomBar(
     actualViewModel: ChatViewModel,
     inputStyle: String,
     currentChatId: String?,
+    inputMenuRuntime: String,
     enableEnterToSend: Boolean,
     isLoading: Boolean,
     inputState: InputProcessingState,
@@ -1509,6 +1571,7 @@ private fun ChatInputBottomBar(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
+    val waifuPreferences = remember(context) { WaifuPreferences.getInstance(context) }
 
     val userMessage by actualViewModel.userMessage.collectAsState()
     val attachments by actualViewModel.attachments.collectAsState()
@@ -1517,6 +1580,13 @@ private fun ChatInputBottomBar(
     val permissionLevel by actualViewModel.masterPermissionLevel.collectAsState()
     val isSummarizing by actualViewModel.isSummarizing.collectAsState()
     val isSendTriggeredSummarizing by actualViewModel.isSendTriggeredSummarizing.collectAsState()
+    val isWaifuModeEnabled by waifuPreferences.enableWaifuModeFlow.collectAsState(initial = false)
+    val isWaifuMergeSendEnabled by
+        waifuPreferences.waifuEnableMergeSendFlow.collectAsState(initial = false)
+    val waifuMergeSendDelayMs by
+        waifuPreferences.waifuMergeSendDelayMsFlow.collectAsState(
+            initial = WaifuPreferences.DEFAULT_WAIFU_MERGE_SEND_DELAY_MS
+        )
 
     val isMessageProcessing =
         isLoading ||
@@ -1534,8 +1604,116 @@ private fun ChatInputBottomBar(
     var nextPendingQueueId by remember(currentChatId) { mutableStateOf(1L) }
     var wasQueueBlocked by remember(currentChatId) { mutableStateOf(false) }
     var suppressNextAutoDequeue by remember(currentChatId) { mutableStateOf(false) }
+    val waifuMergeBuffer = remember(currentChatId) { mutableStateListOf<String>() }
     val latestQueueBlocked = rememberUpdatedState(isQueueBlocked)
     val latestCurrentChatId = rememberUpdatedState(currentChatId)
+
+    fun buildChatInputHookContext(
+        eventName: String,
+        text: String = userMessage.text,
+        selectionStart: Int = userMessage.selection.start,
+        selectionEnd: Int = userMessage.selection.end,
+        source: String = inputStyle,
+        submitSource: String = ""
+    ): ChatInputHookContext {
+        val normalizedSelectionStart = selectionStart.coerceIn(0, text.length)
+        val normalizedSelectionEnd = selectionEnd.coerceIn(0, text.length)
+        return ChatInputHookContext(
+            context = context,
+            eventName = eventName,
+            chatId = currentChatId,
+            text = text,
+            selectionStart = normalizedSelectionStart,
+            selectionEnd = normalizedSelectionEnd,
+            hasAttachments = attachments.isNotEmpty(),
+            attachmentCount = attachments.size,
+            isProcessing = isMessageProcessing,
+            inputStyle = inputStyle,
+            source = source,
+            submitSource = submitSource
+        )
+    }
+
+    fun handleUserMessageChange(value: TextFieldValue) {
+        actualViewModel.updateUserMessage(value)
+        ChatInputHookRegistry.dispatchNotification(
+            buildChatInputHookContext(
+                eventName = ChatInputEvents.INPUT_CHANGED,
+                text = value.text,
+                selectionStart = value.selection.start,
+                selectionEnd = value.selection.end
+            )
+        )
+    }
+
+    fun showChatInputHookMessage(message: String?) {
+        val normalizedMessage = message?.trim().orEmpty()
+        if (normalizedMessage.isNotBlank()) {
+            Toast.makeText(context, normalizedMessage, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(
+        currentChatId,
+        waifuMergeBuffer.size,
+        isWaifuModeEnabled,
+        isWaifuMergeSendEnabled,
+        waifuMergeSendDelayMs
+    ) {
+        if (!isWaifuModeEnabled || !isWaifuMergeSendEnabled) {
+            waifuMergeBuffer.clear()
+            return@LaunchedEffect
+        }
+        if (waifuMergeBuffer.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        delay(waifuMergeSendDelayMs.toLong())
+        snapshotFlow { latestQueueBlocked.value }.first { blocked -> !blocked }
+
+        val messages = waifuMergeBuffer.toList()
+        if (messages.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        val chatId = latestCurrentChatId.value
+        if (chatId.isNullOrBlank()) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.chat_please_create_new_chat),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return@LaunchedEffect
+        }
+
+        val triggerText = messages.last()
+        val removedVisibleMessage =
+            actualViewModel.removeLastVisibleUserMessageFromCurrentChat(triggerText)
+        if (!removedVisibleMessage) {
+            return@LaunchedEffect
+        }
+        waifuMergeBuffer.clear()
+
+        focusManager.clearFocus()
+        actualViewModel.sendTextMessage(triggerText)
+        onRequestAutoScrollToBottom()
+        ChatInputHookRegistry.dispatchNotification(
+            buildChatInputHookContext(
+                eventName = ChatInputEvents.SUBMITTED,
+                text = triggerText,
+                selectionStart = triggerText.length,
+                selectionEnd = triggerText.length,
+                source = "waifu_merge",
+                submitSource = "waifu_merge"
+            )
+        )
+    }
+
+    fun restorePendingQueueItem(item: PendingQueueMessageItem) {
+        if (pendingQueueMessages.none { it.id == item.id }) {
+            pendingQueueMessages.add(0, item)
+        }
+    }
 
     fun removePendingQueueMessageById(id: Long): PendingQueueMessageItem? {
         val index = pendingQueueMessages.indexOfFirst { it.id == id }
@@ -1546,6 +1724,29 @@ private fun ChatInputBottomBar(
     val sendQueuedItemNow: (PendingQueueMessageItem, Boolean) -> Unit =
         { item, cancelCurrentConversation ->
             coroutineScope.launch {
+                val submitDecision =
+                    ChatInputHookRegistry.dispatchSubmitRequested(
+                        buildChatInputHookContext(
+                            eventName = ChatInputEvents.SUBMIT_REQUESTED,
+                            text = item.text,
+                            selectionStart = item.text.length,
+                            selectionEnd = item.text.length,
+                            source = "queue",
+                            submitSource = "queue"
+                        )
+                    )
+                when (submitDecision.action) {
+                    ChatInputSubmitActions.BLOCK -> {
+                        restorePendingQueueItem(item)
+                        showChatInputHookMessage(submitDecision.message)
+                        return@launch
+                    }
+                    ChatInputSubmitActions.CONSUME -> {
+                        showChatInputHookMessage(submitDecision.message)
+                        return@launch
+                    }
+                }
+                val finalText = submitDecision.text ?: item.text
                 val shouldWaitForCancel = cancelCurrentConversation && latestQueueBlocked.value
                 if (shouldWaitForCancel) {
                     suppressNextAutoDequeue = true
@@ -1568,8 +1769,18 @@ private fun ChatInputBottomBar(
                 }
 
                 focusManager.clearFocus()
-                actualViewModel.sendTextMessage(item.text)
+                actualViewModel.sendTextMessage(finalText)
                 onRequestAutoScrollToBottom()
+                ChatInputHookRegistry.dispatchNotification(
+                    buildChatInputHookContext(
+                        eventName = ChatInputEvents.SUBMITTED,
+                        text = finalText,
+                        selectionStart = finalText.length,
+                        selectionEnd = finalText.length,
+                        source = "queue",
+                        submitSource = "queue"
+                    )
+                )
             }
         }
 
@@ -1604,26 +1815,77 @@ private fun ChatInputBottomBar(
         actualViewModel.showToast(context.getString(R.string.chat_queue_added))
     }
 
-    val sendMessage = remember(
-        currentChatId,
-        actualViewModel,
-        context,
-        focusManager,
-        onRequestAutoScrollToBottom,
-    ) {
-        {
+    val sendMessage: () -> Unit = {
+        coroutineScope.launch {
             if (currentChatId.isNullOrBlank()) {
                 Toast.makeText(
                     context,
                     context.getString(R.string.chat_please_create_new_chat),
                     Toast.LENGTH_SHORT,
                 ).show()
-            } else {
-                focusManager.clearFocus()
-                actualViewModel.sendUserMessage()
-                actualViewModel.resetAttachmentPanelState()
-                onRequestAutoScrollToBottom()
+                return@launch
             }
+
+            val submitDecision =
+                ChatInputHookRegistry.dispatchSubmitRequested(
+                    buildChatInputHookContext(
+                        eventName = ChatInputEvents.SUBMIT_REQUESTED,
+                        submitSource = "send"
+                    )
+                )
+            when (submitDecision.action) {
+                ChatInputSubmitActions.BLOCK -> {
+                    showChatInputHookMessage(submitDecision.message)
+                    return@launch
+                }
+                ChatInputSubmitActions.CONSUME -> {
+                    if (submitDecision.clearInput) {
+                        actualViewModel.updateUserMessage(TextFieldValue(""))
+                        actualViewModel.resetAttachmentPanelState()
+                    }
+                    showChatInputHookMessage(submitDecision.message)
+                    return@launch
+                }
+            }
+
+            val finalText = submitDecision.text ?: userMessage.text
+            if (finalText != userMessage.text) {
+                actualViewModel.updateUserMessage(
+                    TextFieldValue(
+                        text = finalText,
+                        selection = TextRange(finalText.length)
+                    )
+                )
+            }
+            val shouldUseWaifuMergeSend =
+                isWaifuModeEnabled &&
+                    isWaifuMergeSendEnabled &&
+                    attachments.isEmpty() &&
+                    replyToMessage == null &&
+                    finalText.isNotBlank()
+            if (shouldUseWaifuMergeSend) {
+                val visibleText = finalText.trim()
+                waifuMergeBuffer.add(visibleText)
+                actualViewModel.addVisibleUserMessageToCurrentChat(visibleText)
+                actualViewModel.updateUserMessage(TextFieldValue(""))
+                actualViewModel.resetAttachmentPanelState()
+                focusManager.clearFocus()
+                onRequestAutoScrollToBottom()
+                return@launch
+            }
+            focusManager.clearFocus()
+            actualViewModel.sendUserMessage()
+            actualViewModel.resetAttachmentPanelState()
+            onRequestAutoScrollToBottom()
+            ChatInputHookRegistry.dispatchNotification(
+                buildChatInputHookContext(
+                    eventName = ChatInputEvents.SUBMITTED,
+                    text = finalText,
+                    selectionStart = finalText.length,
+                    selectionEnd = finalText.length,
+                    submitSource = "send"
+                )
+            )
         }
     }
 
@@ -1631,7 +1893,7 @@ private fun ChatInputBottomBar(
         AgentChatInputSection(
                 actualViewModel = actualViewModel,
                 userMessage = userMessage,
-                onUserMessageChange = actualViewModel::updateUserMessage,
+                onUserMessageChange = { value -> handleUserMessageChange(value) },
                 enableEnterToSend = enableEnterToSend,
                 onSendMessage = sendMessage,
                 onQueueMessage = { enqueueDraftToPendingQueue() },
@@ -1647,6 +1909,7 @@ private fun ChatInputBottomBar(
                 onAttachNotifications = actualViewModel::captureNotifications,
                 onAttachLocation = actualViewModel::captureLocation,
                 onAttachMemory = onShowMemoryFolderDialog,
+                onAttachPackage = actualViewModel::attachPackage,
                 onTakePhoto = actualViewModel::handleTakenPhoto,
                 hasBackgroundImage = hasBackgroundImage,
                 chatInputTransparent = chatInputTransparent,
@@ -1666,10 +1929,12 @@ private fun ChatInputBottomBar(
                 onThinkingQualityLevelChange = actualViewModel::updateThinkingQualityLevel,
                 enableMaxContextMode = enableMaxContextMode,
                 onToggleEnableMaxContextMode = actualViewModel::toggleEnableMaxContextMode,
+                currentChatId = currentChatId,
                 featureStates = featureStates,
                 onToggleFeature = actualViewModel::toggleFeature,
+                inputMenuRuntime = inputMenuRuntime,
                 permissionLevel = permissionLevel,
-                onTogglePermission = actualViewModel::toggleMasterPermission,
+                onSetPermissionLevel = actualViewModel::setMasterPermissionLevel,
                 enableMemoryAutoUpdate = enableMemoryAutoUpdate,
                 onToggleMemoryAutoUpdate = actualViewModel::toggleMemoryAutoUpdate,
                 isAutoReadEnabled = isAutoReadEnabled,
@@ -1716,7 +1981,7 @@ private fun ChatInputBottomBar(
         ClassicChatInputSection(
                 actualViewModel = actualViewModel,
                 userMessage = userMessage,
-                onUserMessageChange = actualViewModel::updateUserMessage,
+                onUserMessageChange = { value -> handleUserMessageChange(value) },
                 enableEnterToSend = enableEnterToSend,
                 onSendMessage = sendMessage,
                 onQueueMessage = { enqueueDraftToPendingQueue() },
@@ -1732,6 +1997,7 @@ private fun ChatInputBottomBar(
                 onAttachNotifications = actualViewModel::captureNotifications,
                 onAttachLocation = actualViewModel::captureLocation,
                 onAttachMemory = onShowMemoryFolderDialog,
+                onAttachPackage = actualViewModel::attachPackage,
                 onTakePhoto = actualViewModel::handleTakenPhoto,
                 hasBackgroundImage = hasBackgroundImage,
                 chatInputTransparent = chatInputTransparent,
@@ -1772,17 +2038,18 @@ private fun ChatInputBottomBar(
 }
 
 @Composable
-private fun WorkspaceFileSelectorOverlay(
+private fun MentionSuggestionOverlay(
     actualViewModel: ChatViewModel,
     bottomBarHeightPx: Int,
-    backgroundColor: Color,
+    inputBarTranslationYPx: Float,
+    panelStyle: MentionSuggestionPanelStyle,
 ) {
     val density = LocalDensity.current
-    val showWorkspaceFileSelector by actualViewModel.showWorkspaceFileSelector.collectAsState()
+    val showMentionSuggestionPanel by actualViewModel.showMentionSuggestionPanel.collectAsState()
     val bottomPaddingForSelector = with(density) { bottomBarHeightPx.toDp() }
 
     AnimatedVisibility(
-        visible = showWorkspaceFileSelector,
+        visible = showMentionSuggestionPanel,
         enter = fadeIn(animationSpec = tween(durationMillis = 180)),
         exit = fadeOut(animationSpec = tween(durationMillis = 150)),
     ) {
@@ -1794,50 +2061,31 @@ private fun WorkspaceFileSelectorOverlay(
                 modifier =
                     Modifier
                         .matchParentSize()
-                        .background(Color.Black.copy(alpha = 0.2f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = actualViewModel::hideWorkspaceFileSelector,
+                            onClick = actualViewModel::hideMentionSuggestionPanel,
                         ),
             )
-            WorkspaceFileSelector(
+            MentionSuggestionPanel(
                 modifier =
                     Modifier
-                        .padding(bottom = bottomPaddingForSelector)
+                        .padding(start = 12.dp, end = 12.dp, bottom = bottomPaddingForSelector + 8.dp)
+                        .graphicsLayer { translationY = -inputBarTranslationYPx }
                         .animateEnterExit(
                             enter = slideInVertically(
                                 animationSpec = tween(durationMillis = 240),
-                            ) { it },
+                            ) { it / 4 },
                             exit = slideOutVertically(
                                 animationSpec = tween(durationMillis = 200),
-                            ) { it },
+                            ) { it / 4 },
                         ),
                 viewModel = actualViewModel,
-                onFileSelected = { filePath ->
-                    val currentChat =
-                        actualViewModel.chatHistories.value.find {
-                            it.id == actualViewModel.currentChatId.value
-                        }
-                    val workspacePath = currentChat?.workspace
-                    val relativePath =
-                        if (workspacePath != null) {
-                            File(filePath).relativeTo(File(workspacePath)).path
-                        } else {
-                            filePath
-                        }
-                    val currentText = actualViewModel.userMessage.value.text
-                    val newText = currentText.replaceAfterLast('@', "$relativePath ")
-                    actualViewModel.updateUserMessage(
-                        TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newText.length),
-                        ),
-                    )
-                    actualViewModel.hideWorkspaceFileSelector()
+                panelStyle = panelStyle,
+                onFileSelected = { relativePath ->
+                    actualViewModel.selectMentionWorkspaceEntry(relativePath)
                 },
-                onShouldHide = actualViewModel::hideWorkspaceFileSelector,
-                backgroundColor = backgroundColor,
+                onPackageSelected = actualViewModel::selectMentionPackage,
             )
         }
     }

@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnit.Companion.Unspecified
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -357,6 +359,7 @@ fun StreamMarkdownRenderer(
         markdownStream: Stream<Char>,
         modifier: Modifier = Modifier,
         textColor: Color = LocalContentColor.current,
+        fontSize: TextUnit = Unspecified,
         backgroundColor: Color = MaterialTheme.colorScheme.surface,
         onLinkClick: ((String) -> Unit)? = null,
         xmlRenderer: XmlContentRenderer = remember { DefaultXmlRenderer() },
@@ -597,6 +600,7 @@ fun StreamMarkdownRenderer(
                     rendererId = rendererId,
                     nodeAnimationStates = nodeAnimationStates,
                     textColor = textColor,
+                    fontSize = fontSize,
                     onLinkClick = onLinkClick,
                     xmlRenderer = xmlRenderer,
                     xmlStreamsByIndex = xmlNodeStreams,
@@ -665,6 +669,7 @@ fun StreamMarkdownRenderer(
         content: String,
         modifier: Modifier = Modifier,
         textColor: Color = LocalContentColor.current,
+        fontSize: TextUnit = Unspecified,
         backgroundColor: Color = MaterialTheme.colorScheme.surface,
         onLinkClick: ((String) -> Unit)? = null,
         xmlRenderer: XmlContentRenderer = remember { DefaultXmlRenderer() },
@@ -905,6 +910,7 @@ fun StreamMarkdownRenderer(
                     rendererId = rendererId,
                     nodeAnimationStates = nodeAnimationStates,
                     textColor = textColor,
+                    fontSize = fontSize,
                     onLinkClick = onLinkClick,
                     xmlRenderer = xmlRenderer,
                     xmlStreamsByIndex = xmlNodeStreams,
@@ -943,6 +949,7 @@ private fun AnimatedNode(
     index: Int,
     isVisible: Boolean,
     textColor: Color,
+    fontSize: TextUnit,
     onLinkClick: ((String) -> Unit)?,
     xmlRenderer: XmlContentRenderer,
     xmlStream: Stream<String>?,
@@ -966,6 +973,7 @@ private fun AnimatedNode(
             nodeKey = nodeKey,
             node = node,
             textColor = textColor,
+            fontSize = fontSize,
             modifier = Modifier,
             onLinkClick = onLinkClick,
             index = index,
@@ -984,6 +992,7 @@ private fun UnifiedMarkdownCanvas(
     rendererId: String,
     nodeAnimationStates: Map<String, Boolean>,
     textColor: Color,
+    fontSize: TextUnit,
     onLinkClick: ((String) -> Unit)?,
     xmlRenderer: XmlContentRenderer,
     xmlStreamsByIndex: Map<Int, Stream<String>>,
@@ -1014,7 +1023,6 @@ private fun UnifiedMarkdownCanvas(
         remember(groupingKey, rendererId, nodeGrouper) {
             nodeGrouper.group(nodes, rendererId)
         }
-
     Column(modifier = modifier) {
         groupedItems.forEach { item ->
             when (item) {
@@ -1029,6 +1037,7 @@ private fun UnifiedMarkdownCanvas(
                             index = index,
                             isVisible = nodeAnimationStates[nodeKey] ?: true,
                             textColor = textColor,
+                            fontSize = fontSize,
                             onLinkClick = onLinkClick,
                             xmlRenderer = xmlRenderer,
                             xmlStream = xmlStreamsByIndex[index],
@@ -1055,6 +1064,7 @@ private fun UnifiedMarkdownCanvas(
                             xmlRenderer = xmlRenderer,
                             xmlStreamResolver = { idx -> xmlStreamsByIndex[idx] },
                             fillMaxWidth = fillMaxWidth,
+                            fontSize = fontSize,
                         )
                     }
                 }

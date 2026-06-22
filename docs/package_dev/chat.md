@@ -93,13 +93,17 @@ findChat({ query, match?, index? }): Promise<ChatFindResultData>
 
 `options` 支持：
 
+- `runtime?: 'main' | 'floating'`
 - `persist_turn?: boolean`
 - `notify_reply?: boolean`
 - `hide_user_message?: boolean`
 - `disable_warning?: boolean`
 - `timeout_ms?: number`
 
-其中 `timeout_ms` 用于控制本次发送的最长等待时间，单位毫秒。
+其中：
+
+- `runtime` 用于指定本次消息发送到哪个 chat runtime，未指定时默认走 `floating`
+- `timeout_ms` 用于控制本次发送的最长等待时间，单位毫秒
 
 ### `listCharacterCards()`
 

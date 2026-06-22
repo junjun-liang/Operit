@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -180,12 +181,13 @@ sealed class Screen(
                 onError: (String) -> Unit,
                 onGestureConsumed: (Boolean) -> Unit
         ) {
+            val context = LocalContext.current
             PackageManagerScreen(
                 onNavigateToMCPMarket = { navigateTo(Market(MarketHomeTab.MCP)) },
                 onNavigateToSkillMarket = { navigateTo(Market(MarketHomeTab.SKILL)) },
                 onNavigateToArtifactMarket = { navigateTo(Market(MarketHomeTab.ARTIFACT)) },
                 onStartPluginCreation = { intent ->
-                    PendingChatDraftHandler.setPendingDraft(intent.toPrompt())
+                    PendingChatDraftHandler.setPendingDraft(intent.toPrompt(context))
                     val chatEntry = AppRouteCatalog.toEntry(AiChat)
                     AppRouterGateway.resetTo(
                         routeId = chatEntry.routeId,
@@ -333,12 +335,13 @@ sealed class Screen(
                 onError: (String) -> Unit,
                 onGestureConsumed: (Boolean) -> Unit
         ) {
+            val context = LocalContext.current
             ArtifactDetailScreen(
                 issue = issue,
                 entryPoint = entryPoint,
                 onNavigateBack = onGoBack,
                 onStartPluginCreation = { intent ->
-                    PendingChatDraftHandler.setPendingDraft(intent.toPrompt())
+                    PendingChatDraftHandler.setPendingDraft(intent.toPrompt(context))
                     val chatEntry = AppRouteCatalog.toEntry(AiChat)
                     AppRouterGateway.resetTo(
                         routeId = chatEntry.routeId,
@@ -371,7 +374,7 @@ sealed class Screen(
                 },
                 onNavigateToPublish = { navigateTo(SkillPublish) },
                 onNavigateToDetail = { issue ->
-                    navigateTo(SkillDetail(issue))
+                    navigateTo(SkillDetail(issue, fromManage = true))
                 }
             )
         }
@@ -411,7 +414,10 @@ sealed class Screen(
         }
     }
 
-    data class SkillDetail(val issue: com.ai.assistance.operit.data.api.GitHubIssue) :
+    data class SkillDetail(
+        val issue: com.ai.assistance.operit.data.api.GitHubIssue,
+        val fromManage: Boolean = false
+    ) :
             Screen(navItem = NavItem.Packages) {
         @Composable
         override fun Content(
@@ -425,6 +431,7 @@ sealed class Screen(
         ) {
             SkillDetailScreen(
                 issue = issue,
+                fromManage = fromManage,
                 onNavigateBack = onGoBack
             )
         }
@@ -461,7 +468,10 @@ sealed class Screen(
                 onNavigateToEdit = { issue ->
                     navigateTo(MCPEditPlugin(issue))
                 },
-                onNavigateToPublish = { navigateTo(MCPPublish) }
+                onNavigateToPublish = { navigateTo(MCPPublish) },
+                onNavigateToDetail = { issue ->
+                    navigateTo(MCPPluginDetail(issue, fromManage = true))
+                }
             )
         }
     }
@@ -1470,7 +1480,10 @@ sealed class Screen(
     }
 
     // MCP 插件详情页面
-    data class MCPPluginDetail(val issue: com.ai.assistance.operit.data.api.GitHubIssue) :
+    data class MCPPluginDetail(
+        val issue: com.ai.assistance.operit.data.api.GitHubIssue,
+        val fromManage: Boolean = false
+    ) :
             Screen(navItem = NavItem.Packages) {
         @Composable
         override fun Content(
@@ -1484,6 +1497,7 @@ sealed class Screen(
         ) {
             MCPPluginDetailScreen(
                 issue = issue,
+                fromManage = fromManage,
                 onNavigateBack = onGoBack
             )
         }

@@ -20,8 +20,7 @@ private val Context.displayPreferencesDataStore: DataStore<Preferences> by prefe
 
 /**
  * DisplayPreferencesManager
- * 管理消息显示相关的偏好设置
- * 这些设置独立于角色卡和主题系统
+ * 管理系统显示与行为相关的偏好设置
  * 使用单例模式，避免重复创建实例
  */
 class DisplayPreferencesManager private constructor(private val context: Context) {
@@ -38,18 +37,6 @@ class DisplayPreferencesManager private constructor(private val context: Context
             }
         }
 
-        // 消息显示设置的 Key
-        private val KEY_SHOW_MODEL_PROVIDER = booleanPreferencesKey("show_model_provider")
-        private val KEY_SHOW_MODEL_NAME = booleanPreferencesKey("show_model_name")
-        private val KEY_SHOW_ROLE_NAME = booleanPreferencesKey("show_role_name")
-        private val KEY_SHOW_USER_NAME = booleanPreferencesKey("show_user_name")
-        private val KEY_SHOW_MESSAGE_TOKEN_STATS = booleanPreferencesKey("show_message_token_stats")
-        private val KEY_SHOW_MESSAGE_TIMING_STATS = booleanPreferencesKey("show_message_timing_stats")
-        
-        // 全局用户设置的 Key
-        private val KEY_GLOBAL_USER_AVATAR_URI = stringPreferencesKey("global_user_avatar_uri")
-        private val KEY_GLOBAL_USER_NAME = stringPreferencesKey("global_user_name")
-        
         // 显示相关设置的 Key
         private val KEY_SHOW_FPS_COUNTER = booleanPreferencesKey("show_fps_counter")
         private val KEY_ENABLE_REPLY_NOTIFICATION = booleanPreferencesKey("enable_reply_notification")
@@ -60,6 +47,10 @@ class DisplayPreferencesManager private constructor(private val context: Context
         private val KEY_ENABLE_ENTER_TO_SEND = booleanPreferencesKey("enable_enter_to_send")
         private val KEY_ENABLE_NAVIGATION_ANIMATION =
             booleanPreferencesKey("enable_navigation_animation")
+
+        // 全局用户资料的 Key
+        private val KEY_GLOBAL_USER_AVATAR_URI = stringPreferencesKey("global_user_avatar_uri")
+        private val KEY_GLOBAL_USER_NAME = stringPreferencesKey("global_user_name")
 
         // 自动化显示与行为相关设置的 Key
         private val KEY_ENABLE_BACKGROUND_KEEP_ALIVE =
@@ -80,76 +71,6 @@ class DisplayPreferencesManager private constructor(private val context: Context
         // 工具折叠设置（多个只读工具 / 多个任意工具 / 全部工具）
         private val KEY_TOOL_COLLAPSE_MODE = stringPreferencesKey("tool_collapse_mode")
     }
-
-    /**
-     * 是否显示模型供应商
-     * 默认值：false
-     */
-    val showModelProvider: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_MODEL_PROVIDER] ?: false
-        }
-
-    /**
-     * 是否显示模型名称
-     * 默认值：false
-     */
-    val showModelName: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_MODEL_NAME] ?: false
-        }
-
-    /**
-     * 是否显示角色卡名称
-     * 默认值：false
-     */
-    val showRoleName: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_ROLE_NAME] ?: false
-        }
-
-    /**
-     * 是否显示用户名字
-     * 默认值：false
-     */
-    val showUserName: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_USER_NAME] ?: false
-        }
-
-    /**
-     * 是否显示消息 Token 统计
-     * 默认值：false
-     */
-    val showMessageTokenStats: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_MESSAGE_TOKEN_STATS] ?: false
-        }
-
-    /**
-     * 是否显示消息耗时统计
-     * 默认值：false
-     */
-    val showMessageTimingStats: Flow<Boolean> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_SHOW_MESSAGE_TIMING_STATS] ?: false
-        }
-
-    /**
-     * 全局用户头像URI
-     */
-    val globalUserAvatarUri: Flow<String?> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_GLOBAL_USER_AVATAR_URI]
-        }
-
-    /**
-     * 全局用户名称
-     */
-    val globalUserName: Flow<String?> =
-        context.displayPreferencesDataStore.data.map { preferences ->
-            preferences[KEY_GLOBAL_USER_NAME]
-        }
 
     /**
      * 是否显示FPS计数器
@@ -205,6 +126,22 @@ class DisplayPreferencesManager private constructor(private val context: Context
             preferences[KEY_ENABLE_NAVIGATION_ANIMATION] ?: true
         }
 
+    /**
+     * 全局用户头像URI
+     */
+    val globalUserAvatarUri: Flow<String?> =
+        context.displayPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_GLOBAL_USER_AVATAR_URI]
+        }
+
+    /**
+     * 全局用户名称
+     */
+    val globalUserName: Flow<String?> =
+        context.displayPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_GLOBAL_USER_NAME]
+        }
+
     val enableBackgroundKeepAlive: Flow<Boolean> =
         context.displayPreferencesDataStore.data.map { preferences ->
             preferences[KEY_ENABLE_BACKGROUND_KEEP_ALIVE] ?: false
@@ -254,20 +191,14 @@ class DisplayPreferencesManager private constructor(private val context: Context
      * 保存显示设置
      */
     suspend fun saveDisplaySettings(
-        showModelProvider: Boolean? = null,
-        showModelName: Boolean? = null,
-        showRoleName: Boolean? = null,
-        showUserName: Boolean? = null,
-        showMessageTokenStats: Boolean? = null,
-        showMessageTimingStats: Boolean? = null,
-        globalUserAvatarUri: String? = null,
-        globalUserName: String? = null,
         showFpsCounter: Boolean? = null,
         enableReplyNotification: Boolean? = null,
         enableReplyNotificationSound: Boolean? = null,
         enableReplyNotificationVibration: Boolean? = null,
         enableEnterToSend: Boolean? = null,
         enableNavigationAnimation: Boolean? = null,
+        globalUserAvatarUri: String? = null,
+        globalUserName: String? = null,
         enableBackgroundKeepAlive: Boolean? = null,
         enableExperimentalVirtualDisplay: Boolean? = null,
         hideRuntimeTaskView: Boolean? = null,
@@ -279,14 +210,6 @@ class DisplayPreferencesManager private constructor(private val context: Context
         toolCollapseMode: ToolCollapseMode? = null
     ) {
         context.displayPreferencesDataStore.edit { preferences ->
-            showModelProvider?.let { preferences[KEY_SHOW_MODEL_PROVIDER] = it }
-            showModelName?.let { preferences[KEY_SHOW_MODEL_NAME] = it }
-            showRoleName?.let { preferences[KEY_SHOW_ROLE_NAME] = it }
-            showUserName?.let { preferences[KEY_SHOW_USER_NAME] = it }
-            showMessageTokenStats?.let { preferences[KEY_SHOW_MESSAGE_TOKEN_STATS] = it }
-            showMessageTimingStats?.let { preferences[KEY_SHOW_MESSAGE_TIMING_STATS] = it }
-            globalUserAvatarUri?.let { preferences[KEY_GLOBAL_USER_AVATAR_URI] = it }
-            globalUserName?.let { preferences[KEY_GLOBAL_USER_NAME] = it }
             showFpsCounter?.let { preferences[KEY_SHOW_FPS_COUNTER] = it }
             enableReplyNotification?.let { preferences[KEY_ENABLE_REPLY_NOTIFICATION] = it }
             enableReplyNotificationSound?.let {
@@ -299,6 +222,8 @@ class DisplayPreferencesManager private constructor(private val context: Context
             enableNavigationAnimation?.let {
                 preferences[KEY_ENABLE_NAVIGATION_ANIMATION] = it
             }
+            globalUserAvatarUri?.let { preferences[KEY_GLOBAL_USER_AVATAR_URI] = it }
+            globalUserName?.let { preferences[KEY_GLOBAL_USER_NAME] = it }
             enableBackgroundKeepAlive?.let {
                 preferences[KEY_ENABLE_BACKGROUND_KEEP_ALIVE] = it
             }
@@ -358,20 +283,14 @@ class DisplayPreferencesManager private constructor(private val context: Context
      */
     suspend fun resetDisplaySettings() {
         context.displayPreferencesDataStore.edit { preferences ->
-            preferences[KEY_SHOW_MODEL_PROVIDER] = false
-            preferences[KEY_SHOW_MODEL_NAME] = false
-            preferences[KEY_SHOW_ROLE_NAME] = false
-            preferences[KEY_SHOW_USER_NAME] = false
-            preferences[KEY_SHOW_MESSAGE_TOKEN_STATS] = false
-            preferences[KEY_SHOW_MESSAGE_TIMING_STATS] = false
-            preferences.remove(KEY_GLOBAL_USER_AVATAR_URI)
-            preferences.remove(KEY_GLOBAL_USER_NAME)
             preferences[KEY_SHOW_FPS_COUNTER] = false
             preferences[KEY_ENABLE_REPLY_NOTIFICATION] = true
             preferences[KEY_ENABLE_REPLY_NOTIFICATION_SOUND] = false
             preferences[KEY_ENABLE_REPLY_NOTIFICATION_VIBRATION] = false
             preferences[KEY_ENABLE_ENTER_TO_SEND] = false
             preferences.remove(KEY_ENABLE_NAVIGATION_ANIMATION)
+            preferences.remove(KEY_GLOBAL_USER_AVATAR_URI)
+            preferences.remove(KEY_GLOBAL_USER_NAME)
             preferences[KEY_ENABLE_BACKGROUND_KEEP_ALIVE] = false
             preferences[KEY_ENABLE_EXPERIMENTAL_VIRTUAL_DISPLAY] = true
             preferences[KEY_HIDE_RUNTIME_TASK_VIEW] = false

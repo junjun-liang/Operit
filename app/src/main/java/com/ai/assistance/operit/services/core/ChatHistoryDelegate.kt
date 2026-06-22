@@ -337,6 +337,12 @@ class ChatHistoryDelegate(
     suspend fun getRuntimeChatHistory(chatId: String): List<ChatMessage> =
         chatHistoryManager.loadRuntimeChatMessages(chatId)
 
+    suspend fun getRuntimeChatHistoryUpTo(
+        chatId: String,
+        upToTimestampInclusive: Long
+    ): List<ChatMessage> =
+        chatHistoryManager.loadRuntimeChatMessagesUpTo(chatId, upToTimestampInclusive)
+
     suspend fun getCurrentRuntimeChatHistorySnapshot(): List<ChatMessage> {
         val chatId = _currentChatId.value ?: return emptyList()
         return chatHistoryManager.loadRuntimeChatMessages(chatId)
@@ -353,8 +359,11 @@ class ChatHistoryDelegate(
             upToTimestampInclusive = upToTimestampInclusive,
         )
 
-    suspend fun loadChatMessageLocatorPreviews(chatId: String): List<ChatMessageLocatorPreview> =
-        chatHistoryManager.loadChatMessageLocatorPreviews(chatId)
+    suspend fun loadChatMessageLocatorPreviews(
+        chatId: String,
+        query: String = "",
+    ): List<ChatMessageLocatorPreview> =
+        chatHistoryManager.loadChatMessageLocatorPreviews(chatId, query)
 
     suspend fun hasUserMessage(chatId: String): Boolean = chatHistoryManager.hasUserMessage(chatId)
 
@@ -1096,6 +1105,23 @@ class ChatHistoryDelegate(
                 }
                 true
             }
+        }
+    }
+
+    suspend fun deleteMessagesByTimestamps(chatId: String, timestamps: List<Long>) {
+        if (timestamps.isEmpty()) {
+            return
+        }
+
+        runDestructiveHistoryMutation(chatId) {
+            timestamps.distinct().forEach { timestamp ->
+                chatHistoryManager.deleteMessage(chatId, timestamp)
+            }
+
+            if (_currentChatId.value == chatId) {
+                reloadCurrentChatDisplayHistory(chatId)
+            }
+            true
         }
     }
 

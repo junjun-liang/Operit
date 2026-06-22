@@ -33,6 +33,25 @@ class MemoryAutoSaveCandidateRepository(
         return candidateBox.put(candidate)
     }
 
+    fun enqueueSelectedUserMessages(
+        chatId: String,
+        triggerMessageTimestamps: List<Long>
+    ) {
+        val normalizedTimestamps =
+            triggerMessageTimestamps
+                .filter { it > 0L }
+                .distinct()
+                .sorted()
+        if (chatId.isBlank() || normalizedTimestamps.isEmpty()) return
+        normalizedTimestamps.forEach { timestamp ->
+            enqueue(
+                chatId = chatId,
+                triggerMessageTimestamp = timestamp,
+                sourceType = MemoryAutoSaveCandidate.SOURCE_TYPE_SELECTED_USER_MESSAGE
+            )
+        }
+    }
+
     fun getPendingAndFailedCandidates(): List<MemoryAutoSaveCandidate> {
         return candidateBox
             .query(

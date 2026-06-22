@@ -43,5 +43,6 @@ data class ToolPkgPromptHookObjectResult(
     val preparedHistory: List<ToolPkgPromptTurn>? = null,
     val systemPrompt: String? = null,
     val toolPrompt: String? = null,
+    val availableTools: List<Map<String, Any?>>? = null,
     val metadata: Map<String, Any?> = emptyMap()
 )

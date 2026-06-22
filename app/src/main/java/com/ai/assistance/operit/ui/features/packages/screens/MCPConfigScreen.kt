@@ -50,13 +50,11 @@ import com.ai.assistance.operit.ui.features.packages.screens.mcp.components.MCPI
 import com.ai.assistance.operit.ui.features.packages.screens.mcp.viewmodel.MCPDeployViewModel
 import com.ai.assistance.operit.ui.features.packages.screens.mcp.viewmodel.MCPViewModel
 import com.ai.assistance.operit.data.mcp.plugins.MCPBridge
-import com.ai.assistance.operit.data.mcp.plugins.MCPBridgeClient
-import com.ai.assistance.operit.data.mcp.plugins.ServiceInfo
-import com.google.gson.JsonParser
 import com.ai.assistance.operit.util.AppLogger
 import android.widget.Toast
 import androidx.compose.ui.res.stringResource
 import com.ai.assistance.operit.R
+import org.json.JSONObject
 
 import java.util.*
 import kotlinx.coroutines.*
@@ -71,7 +69,8 @@ import com.ai.assistance.operit.ui.features.startup.screens.LocalPluginLoadingSt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MCPConfigScreen(
-    onNavigateToMCPMarket: () -> Unit = {}
+    onNavigateToMCPMarket: () -> Unit = {},
+    searchQuery: String = ""
 ) {
     val context = LocalContext.current
     val activity = context as? androidx.activity.ComponentActivity
@@ -123,8 +122,9 @@ fun MCPConfigScreen(
     var initialAutoStartPerformed = remember { mutableStateOf(false) }
 
     var isRefreshing by remember { mutableStateOf(false) }
-    var isToolsLoading by remember { mutableStateOf(false) }
+    var isToolsLoading by remember { mutableStateOf(true) }
     var pendingPluginId by remember { mutableStateOf<String?>(null) }
+    var toolRefreshTrigger by remember { mutableStateOf(0) }
 
     // Freeze list order within this screen session (avoid jumping when status changes)
     var lockedPluginOrder by remember { mutableStateOf<List<String>?>(null) }
@@ -189,6 +189,7 @@ fun MCPConfigScreen(
             }
 
             initialAutoStartPerformed.value = true
+            toolRefreshTrigger++
         }
     }
 
@@ -240,11 +241,12 @@ fun MCPConfigScreen(
     // Effect to fetch and display tools when MCP servers start
     val isPluginLoading by pluginLoadingState.isVisible.collectAsState()
     val wasPluginLoading = remember { mutableStateOf(isPluginLoading) }
-    var toolRefreshTrigger by remember { mutableStateOf(0) }
 
     LaunchedEffect(isPluginLoading) {
         if (wasPluginLoading.value && !isPluginLoading) {
             // Loading has just finished, trigger a refresh.
+            isToolsLoading = true
+            lockedPluginOrder = null
             toolRefreshTrigger++
         }
         wasPluginLoading.value = isPluginLoading
@@ -308,7 +310,33 @@ fun MCPConfigScreen(
         }
     }
 
-    LaunchedEffect(visiblePluginIds, mcpConfigSnapshot, toolRefreshTrigger) {
+    val displayedPluginIds = remember(
+        sortedPluginIds,
+        searchQuery,
+        mcpConfigSnapshot,
+        pluginToolsMap
+    ) {
+        val searchText = searchQuery.trim()
+        if (searchText.isEmpty()) {
+            sortedPluginIds
+        } else {
+            sortedPluginIds.filter { pluginId ->
+                mcpPluginMatchesSearch(
+                    pluginId = pluginId,
+                    displayName = getPluginDisplayName(pluginId, mcpRepository),
+                    metadata = mcpConfigSnapshot.pluginMetadata[pluginId],
+                    toolNames = pluginToolsMap[pluginId],
+                    searchText = searchText
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(toolRefreshTrigger) {
+        if (toolRefreshTrigger == 0) {
+            return@LaunchedEffect
+        }
+
         isToolsLoading = true
         if (visiblePluginIds.isEmpty()) {
             AppLogger.d("MCPConfigScreen", "No configured plugins, clearing tool list.")
@@ -317,14 +345,15 @@ fun MCPConfigScreen(
             return@LaunchedEffect
         }
 
-        // Give services a moment to initialize after starting
-        delay(1000)
-
         AppLogger.d("MCPConfigScreen", "Fetching tools for configured runtime-ready services...")
 
         val toolsMap = mutableMapOf<String, List<String>>()
 
         try {
+            val bridgeServiceTools = parseMCPServiceToolNames(
+                MCPBridge.getInstance(context).listMcpServices()
+            )
+
             for (pluginId in visiblePluginIds) {
                 try {
                     val metadata = mcpConfigSnapshot.pluginMetadata[pluginId]
@@ -335,14 +364,13 @@ fun MCPConfigScreen(
                         continue
                     }
 
-                    val client = MCPBridgeClient(context, pluginId)
-                    val serviceInfo = client.getServiceInfo()
+                    val toolNames = bridgeServiceTools[pluginId].orEmpty()
 
-                    if (serviceInfo != null && serviceInfo.toolNames.isNotEmpty()) {
-                        toolsMap[pluginId] = serviceInfo.toolNames
-                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId has ${serviceInfo.toolNames.size} tools: ${serviceInfo.toolNames.joinToString(", ")}")
+                    if (toolNames.isNotEmpty()) {
+                        toolsMap[pluginId] = toolNames
+                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId has ${toolNames.size} tools: ${toolNames.joinToString(", ")}")
                     } else {
-                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId: no cached tools found.")
+                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId: no tools found.")
                     }
                 } catch (e: Exception) {
                     AppLogger.e("MCPConfigScreen", "Error getting tools for plugin $pluginId: ${e.message}")
@@ -502,6 +530,12 @@ fun MCPConfigScreen(
                 showRemoteEditDialog = false
                 editingRemoteServer = null
                 Toast.makeText(context, context.getString(R.string.remote_service_updated, updatedServer.name), Toast.LENGTH_SHORT).show()
+            },
+            onRegenerateDescription = { server, pluginName ->
+                viewModel.generatePluginDescription(
+                    server = server,
+                    pluginName = pluginName
+                )
             }
         )
     }
@@ -1046,79 +1080,80 @@ fun MCPConfigScreen(
     }
 
     val isAnyLoading =
-        isRefreshing || isToolsLoading || isImporting || isPluginLoading || pendingPluginId != null
+        isRefreshing || isImporting || isPluginLoading || pendingPluginId != null
 
-    val isEmptyLoading = visiblePluginIds.isEmpty() && (isAnyLoading || !initialAutoStartPerformed.value)
+    val isFullscreenLoading =
+        isToolsLoading || (visiblePluginIds.isEmpty() && (isAnyLoading || !initialAutoStartPerformed.value))
+
+    if (isFullscreenLoading) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     
     CustomScaffold(
             floatingActionButton = {
-                if (!isEmptyLoading) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // 启动插件按钮
-                        FloatingActionButton(
-                            onClick = {
-                                if (!isAnyLoading) {
-                                    val lifecycleScope = activity?.lifecycleScope
-                                    if (lifecycleScope != null) {
-                                        pluginLoadingState.reset() // 确保每次都重置状态
-                                        pluginLoadingState.show()
-                                        pluginLoadingState.initializeMCPServer(context, lifecycleScope)
-                                    } else {
-                                        Toast.makeText(context, "Failed to start plugin loading", Toast.LENGTH_SHORT).show()
-                                    }
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 启动插件按钮
+                    FloatingActionButton(
+                        onClick = {
+                            if (!isAnyLoading) {
+                                val lifecycleScope = activity?.lifecycleScope
+                                if (lifecycleScope != null) {
+                                    pluginLoadingState.reset() // 确保每次都重置状态
+                                    pluginLoadingState.show()
+                                    pluginLoadingState.initializeMCPServer(context, lifecycleScope)
+                                } else {
+                                    Toast.makeText(context, "Failed to start plugin loading", Toast.LENGTH_SHORT).show()
                                 }
-                            },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            if (isAnyLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            } else {
-                                Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.start_plugin))
                             }
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        if (isAnyLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        } else {
+                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.start_plugin))
                         }
-                        
-                        // 市场按钮
-                        FloatingActionButton(
-                            onClick = onNavigateToMCPMarket,
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Icon(Icons.Default.Store, contentDescription = stringResource(R.string.mcp_market))
-                        }
-                        
-                        // 导入按钮
-                        FloatingActionButton(
-                            onClick = {
-                                showImportDialog = true
-                            },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.import_action))
-                        }
+                    }
+
+                    // 市场按钮
+                    FloatingActionButton(
+                        onClick = onNavigateToMCPMarket,
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(Icons.Default.Store, contentDescription = stringResource(R.string.mcp_market))
+                    }
+
+                    // 导入按钮
+                    FloatingActionButton(
+                        onClick = {
+                            showImportDialog = true
+                        },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.import_action))
                     }
                 }
             }
     ) { padding ->
-        if (isEmptyLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
                 // 主界面内容
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -1181,10 +1216,10 @@ fun MCPConfigScreen(
 
                     
                     // 插件列表标题
-                    if (sortedPluginIds.isNotEmpty()) {
+                    if (displayedPluginIds.isNotEmpty()) {
                         
                         // 插件列表
-                        items(items = sortedPluginIds, key = { it }) { pluginId ->
+                        items(items = displayedPluginIds, key = { it }) { pluginId ->
                             val pluginInfo = remember(pluginId) {
                                 mcpRepository.getInstalledPluginInfo(pluginId)
                             }
@@ -1310,7 +1345,13 @@ fun MCPConfigScreen(
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            stringResource(R.string.no_plugins),
+                                            stringResource(
+                                                if (searchQuery.isBlank()) {
+                                                    R.string.no_plugins
+                                                } else {
+                                                    R.string.no_matching_plugins_found
+                                                }
+                                            ),
                                             style = MaterialTheme.typography.titleMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1327,8 +1368,42 @@ fun MCPConfigScreen(
                 }
 
             }
+    }
+}
+
+private fun parseMCPServiceToolNames(listResponse: JSONObject?): Map<String, List<String>> {
+    if (listResponse?.optBoolean("success", false) != true) {
+        return emptyMap()
+    }
+
+    val services = listResponse.optJSONObject("result")?.optJSONArray("services") ?: return emptyMap()
+    val serviceTools = mutableMapOf<String, List<String>>()
+
+    for (serviceIndex in 0 until services.length()) {
+        val service = services.optJSONObject(serviceIndex) ?: continue
+        val serviceName = service.optString("name", "").trim()
+        if (serviceName.isEmpty()) {
+            continue
+        }
+
+        val tools = service.optJSONArray("tools") ?: continue
+        val toolNames = mutableListOf<String>()
+        for (toolIndex in 0 until tools.length()) {
+            val toolName = tools.optJSONObject(toolIndex)
+                ?.optString("name", "")
+                ?.trim()
+                .orEmpty()
+            if (toolName.isNotEmpty()) {
+                toolNames.add(toolName)
+            }
+        }
+
+        if (toolNames.isNotEmpty()) {
+            serviceTools[serviceName] = toolNames.distinct()
         }
     }
+
+    return serviceTools
 }
 
 // 从插件ID中提取显示名称
@@ -1346,6 +1421,34 @@ private fun getPluginDisplayName(pluginId: String, mcpRepository: MCPRepository)
             pluginId.removePrefix("official_").replace("_", " ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         else -> pluginId
     }
+}
+
+private fun mcpPluginMatchesSearch(
+    pluginId: String,
+    displayName: String,
+    metadata: MCPLocalServer.PluginMetadata?,
+    toolNames: List<String>?,
+    searchText: String
+): Boolean {
+    val searchableText =
+        buildList {
+            add(pluginId)
+            add(displayName)
+            metadata?.let { pluginMetadata ->
+                add(pluginMetadata.id)
+                add(pluginMetadata.name)
+                add(pluginMetadata.description)
+                add(pluginMetadata.author)
+                add(pluginMetadata.version)
+                add(pluginMetadata.longDescription)
+                add(pluginMetadata.repoUrl)
+                add(pluginMetadata.type)
+                pluginMetadata.endpoint?.let { add(it) }
+            }
+            toolNames?.forEach { toolName -> add(toolName) }
+        }
+
+    return searchableText.any { text -> text.contains(searchText, ignoreCase = true) }
 }
 
 // 获取插件元数据
@@ -1683,16 +1786,20 @@ private fun PluginListItem(
 fun RemoteServerEditDialog(
     server: MCPLocalServer.PluginMetadata,
     onDismiss: () -> Unit,
-    onSave: (MCPLocalServer.PluginMetadata) -> Unit
+    onSave: (MCPLocalServer.PluginMetadata) -> Unit,
+    onRegenerateDescription: suspend (MCPLocalServer.PluginMetadata, String) -> Result<String>
 ) {
-    var name by remember { mutableStateOf(server.name) }
-    var description by remember { mutableStateOf(server.description) }
-    var endpoint by remember { mutableStateOf(server.endpoint ?: "") }
-    var connectionType by remember { mutableStateOf(server.connectionType ?: "httpStream") }
-    var bearerToken by remember { mutableStateOf(server.bearerToken ?: "") }
-    var headers by remember { mutableStateOf(server.headers.toEditableHeaders()) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var name by remember(server.id) { mutableStateOf(server.name) }
+    var description by remember(server.id) { mutableStateOf(server.description) }
+    var endpoint by remember(server.id) { mutableStateOf(server.endpoint ?: "") }
+    var connectionType by remember(server.id) { mutableStateOf(server.connectionType ?: "httpStream") }
+    var bearerToken by remember(server.id) { mutableStateOf(server.bearerToken ?: "") }
+    var headers by remember(server.id) { mutableStateOf(server.headers.toEditableHeaders()) }
     val connectionTypes = listOf("httpStream", "sse")
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember(server.id) { mutableStateOf(false) }
+    var isRegeneratingDescription by remember(server.id) { mutableStateOf(false) }
     val isRemote = server.type == "remote"
 
     AlertDialog(
@@ -1715,6 +1822,64 @@ fun RemoteServerEditDialog(
                     label = { Text(stringResource(R.string.description)) },
                     modifier = Modifier.fillMaxWidth()
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            scope.launch {
+                                isRegeneratingDescription = true
+                                try {
+                                    onRegenerateDescription(server, name)
+                                        .onSuccess { generatedDescription ->
+                                            description = generatedDescription
+                                            Toast.makeText(
+                                                context,
+                                                context.getString(R.string.mcp_regenerate_description_success),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                        .onFailure { error ->
+                                            Toast.makeText(
+                                                context,
+                                                context.getString(
+                                                    R.string.mcp_regenerate_description_failed,
+                                                    error.message ?: context.getString(R.string.unknown_error)
+                                                ),
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                } finally {
+                                    isRegeneratingDescription = false
+                                }
+                            }
+                        },
+                        enabled = !isRegeneratingDescription && name.isNotBlank()
+                    ) {
+                        if (isRegeneratingDescription) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(
+                                if (isRegeneratingDescription) {
+                                    R.string.mcp_regenerating_description
+                                } else {
+                                    R.string.mcp_regenerate_description
+                                }
+                            )
+                        )
+                    }
+                }
                 if(isRemote) {
                     OutlinedTextField(
                         value = endpoint,
@@ -1773,9 +1938,12 @@ fun RemoteServerEditDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val normalizedName = name.trim()
+                    val normalizedDescription = description.trim()
                     val updatedServer = server.copy(
-                        name = name,
-                        description = description,
+                        name = normalizedName,
+                        description = normalizedDescription,
+                        longDescription = normalizedDescription,
                         endpoint = if(isRemote) endpoint else server.endpoint,
                         connectionType = if(isRemote) connectionType else server.connectionType,
                         bearerToken = if(isRemote && bearerToken.isNotBlank()) bearerToken else null,
@@ -1783,7 +1951,7 @@ fun RemoteServerEditDialog(
                     )
                     onSave(updatedServer)
                 },
-                enabled = name.isNotBlank() && if(isRemote) endpoint.isNotBlank() else true
+                enabled = !isRegeneratingDescription && name.isNotBlank() && (if (isRemote) endpoint.isNotBlank() else true)
             ) {
                 Text(stringResource(R.string.save))
             }

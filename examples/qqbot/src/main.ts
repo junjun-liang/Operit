@@ -1,4 +1,5 @@
 import qqbotSettingsScreen from "./ui/qqbot_settings/index.ui.js";
+import "./shared/qqbot_ipc";
 import {
   onQQBotListenerApplicationCreate as qqbotListenerApplicationCreate,
   onQQBotListenerApplicationForeground as qqbotListenerApplicationForeground
@@ -8,14 +9,6 @@ import {
   onQQBotAutoReplyApplicationForeground as qqbotAutoReplyApplicationForeground,
   onQQBotAutoReplyApplicationTerminate as qqbotAutoReplyApplicationTerminate
 } from "./shared/qqbot_auto_reply";
-
-export {
-  qqbotListenerApplicationCreate,
-  qqbotListenerApplicationForeground,
-  qqbotAutoReplyApplicationCreate,
-  qqbotAutoReplyApplicationForeground,
-  qqbotAutoReplyApplicationTerminate
-};
 
 function logQQBotStartup(message: string): void {
   console.log(`[qqbot] ${message}`);

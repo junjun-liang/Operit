@@ -45,6 +45,8 @@ interface ToolResultMap {
 - `share_file` → `FileOperationData`
 - `download_file` → `FileOperationData`
 - `apply_file` → `FileApplyResultData`
+- `create_file` → `FileApplyResultData`
+- `edit_file` → `FileApplyResultData`
 
 ### 网络操作
 
@@ -90,6 +92,25 @@ interface ToolResultMap {
 - `device_info` → `DeviceInfoResultData`
 - `get_notifications` → `NotificationData`
 - `get_device_location` → `LocationData`
+- `request_bluetooth_permission` → `StringResultData`
+- `get_bluetooth_state` → `BluetoothStateData`
+- `request_enable_bluetooth` → `StringResultData`
+- `list_bluetooth_bonded_devices` → `BluetoothBondedDevicesData`
+- `scan_bluetooth_devices` → `BluetoothScanResultData`
+- `bluetooth_connect` → `BluetoothSessionData`
+- `bluetooth_listen` → `BluetoothSessionData`
+- `bluetooth_accept` → `BluetoothSessionData`
+- `bluetooth_send` → `BluetoothTransferData`
+- `bluetooth_read` → `BluetoothReadData`
+- `bluetooth_send_and_read` → `BluetoothReadData`
+- `bluetooth_close` → `StringResultData`
+- `bluetooth_ble_connect` → `BluetoothSessionData`
+- `bluetooth_ble_discover_services` → `BluetoothBleServicesData`
+- `bluetooth_ble_read_characteristic` → `BluetoothReadData`
+- `bluetooth_ble_write_characteristic` → `BluetoothTransferData`
+- `bluetooth_ble_write_and_read_characteristic` → `BluetoothReadData`
+- `bluetooth_ble_subscribe_characteristic` → `BluetoothTransferData`
+- `bluetooth_ble_read_notifications` → `BluetoothBleNotificationData`
 - `read_environment_variable` → `StringResultData`
 - `write_environment_variable` → `StringResultData`
 - `list_sandbox_packages` → `StringResultData`

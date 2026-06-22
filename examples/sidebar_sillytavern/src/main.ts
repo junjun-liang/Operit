@@ -24,7 +24,7 @@ export function registerToolPkg(): boolean {
       zh: "酒馆",
       en: "SillyTavern",
     },
-    icon: "Chat",
+    icon: Icons.Chat,
     order: 122,
   });
 

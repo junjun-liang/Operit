@@ -60,10 +60,21 @@ class ConversationMarkupManager {
                     "<content>$payload</content>"
                 }
             } else {
+                val errorPayload = buildString {
+                    val message = result.error.orEmpty().trim()
+                    val detail = result.result.toString().trim()
+                    append(message)
+                    if (detail.isNotEmpty()) {
+                        if (message.isNotEmpty()) {
+                            append("\n\n")
+                        }
+                        append(detail)
+                    }
+                }
                 createBoundedToolResultXml(
                     toolName = result.toolName,
                     status = "error",
-                    rawPayload = result.error ?: "Unknown error"
+                    rawPayload = errorPayload
                 ) { payload ->
                     "<content><error>$payload</error></content>"
                 }

@@ -356,6 +356,7 @@ internal fun ThemeSettingsChatStyleSection(
     onBubbleAiContentPaddingRightInputChange: (Float) -> Unit,
     saveThemeSettingsWithCharacterCard: SaveThemeSettingsAction,
     preferencesManager: UserPreferencesManager,
+    showInputStyleControls: Boolean = true,
 ) {
     ThemeSettingsSectionTitle(
         title = stringResource(id = R.string.chat_style_title),
@@ -401,48 +402,50 @@ internal fun ThemeSettingsChatStyleSection(
                 }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            if (showInputStyleControls) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            Text(
-                text = stringResource(id = R.string.input_style_title),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            Text(
-                text = stringResource(id = R.string.input_style_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
+                Text(
+                    text = stringResource(id = R.string.input_style_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                Text(
+                    text = stringResource(id = R.string.input_style_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ChatStyleOption(
-                    title = stringResource(id = R.string.input_style_classic),
-                    selected =
-                        inputStyleInput == UserPreferencesManager.INPUT_STYLE_CLASSIC,
-                    modifier = Modifier.weight(1f),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    onInputStyleInputChange(UserPreferencesManager.INPUT_STYLE_CLASSIC)
-                    saveThemeSettingsWithCharacterCard {
-                        preferencesManager.saveThemeSettings(
-                            inputStyle = UserPreferencesManager.INPUT_STYLE_CLASSIC,
-                        )
+                    ChatStyleOption(
+                        title = stringResource(id = R.string.input_style_classic),
+                        selected =
+                            inputStyleInput == UserPreferencesManager.INPUT_STYLE_CLASSIC,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        onInputStyleInputChange(UserPreferencesManager.INPUT_STYLE_CLASSIC)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(
+                                inputStyle = UserPreferencesManager.INPUT_STYLE_CLASSIC,
+                            )
+                        }
                     }
-                }
 
-                ChatStyleOption(
-                    title = stringResource(id = R.string.input_style_agent),
-                    selected = inputStyleInput == UserPreferencesManager.INPUT_STYLE_AGENT,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    onInputStyleInputChange(UserPreferencesManager.INPUT_STYLE_AGENT)
-                    saveThemeSettingsWithCharacterCard {
-                        preferencesManager.saveThemeSettings(
-                            inputStyle = UserPreferencesManager.INPUT_STYLE_AGENT,
-                        )
+                    ChatStyleOption(
+                        title = stringResource(id = R.string.input_style_agent),
+                        selected = inputStyleInput == UserPreferencesManager.INPUT_STYLE_AGENT,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        onInputStyleInputChange(UserPreferencesManager.INPUT_STYLE_AGENT)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(
+                                inputStyle = UserPreferencesManager.INPUT_STYLE_AGENT,
+                            )
+                        }
                     }
                 }
             }
@@ -2533,6 +2536,20 @@ internal fun ThemeSettingsDisplayOptionsSection(
     onShowThinkingProcessInputChange: (Boolean) -> Unit,
     showStatusTagsInput: Boolean,
     onShowStatusTagsInputChange: (Boolean) -> Unit,
+    showModelProviderInput: Boolean,
+    onShowModelProviderInputChange: (Boolean) -> Unit,
+    showModelNameInput: Boolean,
+    onShowModelNameInputChange: (Boolean) -> Unit,
+    showRoleNameInput: Boolean,
+    onShowRoleNameInputChange: (Boolean) -> Unit,
+    showUserNameInput: Boolean,
+    onShowUserNameInputChange: (Boolean) -> Unit,
+    showMessageTokenStatsInput: Boolean,
+    onShowMessageTokenStatsInputChange: (Boolean) -> Unit,
+    showMessageTimingStatsInput: Boolean,
+    onShowMessageTimingStatsInputChange: (Boolean) -> Unit,
+    showMessageTimestampInput: Boolean,
+    onShowMessageTimestampInputChange: (Boolean) -> Unit,
     showInputProcessingStatusInput: Boolean,
     onShowInputProcessingStatusInputChange: (Boolean) -> Unit,
     showChatFloatingDotsAnimationInput: Boolean,
@@ -2569,6 +2586,209 @@ internal fun ThemeSettingsDisplayOptionsSection(
                         onShowThinkingProcessInputChange(it)
                         saveThemeSettingsWithCharacterCard {
                             preferencesManager.saveThemeSettings(showThinkingProcess = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_model_provider),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_model_provider_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showModelProviderInput,
+                    onCheckedChange = {
+                        onShowModelProviderInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showModelProvider = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_model_name),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_model_name_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showModelNameInput,
+                    onCheckedChange = {
+                        onShowModelNameInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showModelName = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_role_name),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_role_name_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showRoleNameInput,
+                    onCheckedChange = {
+                        onShowRoleNameInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showRoleName = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_user_name),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_user_name_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showUserNameInput,
+                    onCheckedChange = {
+                        onShowUserNameInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showUserName = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_message_token_stats),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_message_token_stats_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showMessageTokenStatsInput,
+                    onCheckedChange = {
+                        onShowMessageTokenStatsInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showMessageTokenStats = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_message_timing_stats),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_message_timing_stats_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showMessageTimingStatsInput,
+                    onCheckedChange = {
+                        onShowMessageTimingStatsInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showMessageTimingStats = it)
+                        }
+                    },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.show_message_timestamp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(id = R.string.show_message_timestamp_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showMessageTimestampInput,
+                    onCheckedChange = {
+                        onShowMessageTimestampInputChange(it)
+                        saveThemeSettingsWithCharacterCard {
+                            preferencesManager.saveThemeSettings(showMessageTimestamp = it)
                         }
                     },
                 )

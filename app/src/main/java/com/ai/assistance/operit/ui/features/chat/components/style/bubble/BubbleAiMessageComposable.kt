@@ -117,10 +117,9 @@ fun BubbleAiMessageComposable(
     val bubbleAiCustomFontPath by
         preferencesManager.bubbleAiCustomFontPath.collectAsState(initial = null)
     
-    // 收集显示偏好设置
-    val showModelProvider by displayPreferencesManager.showModelProvider.collectAsState(initial = false)
-    val showModelName by displayPreferencesManager.showModelName.collectAsState(initial = false)
-    val showRoleName by displayPreferencesManager.showRoleName.collectAsState(initial = false)
+    val showModelProvider by preferencesManager.showModelProvider.collectAsState(initial = false)
+    val showModelName by preferencesManager.showModelName.collectAsState(initial = false)
+    val showRoleName by preferencesManager.showRoleName.collectAsState(initial = true)
     val toolCollapseMode by displayPreferencesManager.toolCollapseMode.collectAsState(initial = ToolCollapseMode.ALL)
     
     // 根据角色名获取头像

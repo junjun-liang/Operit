@@ -1,17 +1,24 @@
 package com.ai.assistance.operit.core.tools.defaultTool.websession.browser
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +41,9 @@ import com.ai.assistance.operit.core.tools.defaultTool.websession.userscript.ui.
 import com.ai.assistance.operit.ui.features.websession.browser.WebSessionBrowserScreen
 import com.ai.assistance.operit.ui.features.websession.browser.WebSessionFloatingTheme
 import com.ai.assistance.operit.ui.features.websession.browser.WebSessionMinimizedIndicator
+import com.ai.assistance.operit.util.AppLogger
 import kotlin.math.roundToInt
+import org.json.JSONTokener
 
 internal class WebSessionBrowserHost(
     private val appContext: Context,
@@ -91,6 +100,8 @@ internal class WebSessionBrowserHost(
     private var indicatorView: ComposeView? = null
     private var indicatorParams: WindowManager.LayoutParams? = null
     private var indicatorLifecycleOwner: WebSessionOverlayLifecycleOwner? = null
+    private var selectionActionsView: View? = null
+    private var selectionActionsParams: WindowManager.LayoutParams? = null
 
     private var isExpanded: Boolean = false
     private var hostState by mutableStateOf(WebSessionBrowserHostState())
@@ -194,6 +205,7 @@ internal class WebSessionBrowserHost(
     }
 
     fun destroy() {
+        hideTextSelectionActionsOverlay()
         hideIndicator()
         overlayLifecycleOwner?.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         overlayLifecycleOwner?.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
@@ -241,6 +253,50 @@ internal class WebSessionBrowserHost(
         webViewHost.setActiveWebView(webView)
     }
 
+    fun showTextSelectionActionsOverlay(anchorX: Double, anchorY: Double) {
+        if (!isExpanded) {
+            return
+        }
+
+        val currentView = selectionActionsView
+        if (currentView != null) {
+            updateTextSelectionActionsLayout(currentView, anchorX, anchorY)
+            return
+        }
+
+        val actionsView = createTextSelectionActionsView()
+        val params = createTextSelectionActionsLayoutParams()
+        selectionActionsParams = params
+        try {
+            windowManager.addView(actionsView, params)
+            selectionActionsView = actionsView
+            actionsView.post {
+                updateTextSelectionActionsLayout(actionsView, anchorX, anchorY)
+            }
+        } catch (e: Exception) {
+            selectionActionsParams = null
+            AppLogger.e("WebSessionBrowserHost", "Failed to show WebView text selection actions", e)
+        }
+    }
+
+    fun performTextSelectionHaptic() {
+        rootView?.performHapticFeedback(
+            HapticFeedbackConstants.LONG_PRESS,
+            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+        )
+    }
+
+    fun hideTextSelectionActionsOverlay() {
+        val view = selectionActionsView ?: return
+        try {
+            windowManager.removeView(view)
+        } catch (e: Exception) {
+            AppLogger.e("WebSessionBrowserHost", "Failed to hide WebView text selection actions", e)
+        }
+        selectionActionsView = null
+        selectionActionsParams = null
+    }
+
     fun isExpanded(): Boolean = isExpanded
 
     fun setViewportSize(width: Int, height: Int) {
@@ -270,6 +326,10 @@ internal class WebSessionBrowserHost(
         val params = overlayParams ?: return
         val root = rootView ?: return
         val compose = composeView ?: return
+
+        if (!expanded) {
+            hideTextSelectionActionsOverlay()
+        }
 
         isExpanded = expanded
         hostState =
@@ -347,16 +407,175 @@ internal class WebSessionBrowserHost(
             return
         }
         hostState = updated
-        if (isExpanded) {
-            rootView?.let { root ->
-                overlayParams?.let { params ->
-                    applyExpandedLayoutParams(params)
-                    overlayParams = params
-                    if (root.windowToken != null) {
-                        windowManager.updateViewLayout(root, params)
-                    }
-                }
+    }
+
+    private fun copyActiveWebViewSelection() {
+        evaluateActiveWebViewSelectedText { selectedText ->
+            if (selectedText.isEmpty()) {
+                Toast.makeText(appContext, appContext.getString(R.string.no_text_to_copy), Toast.LENGTH_SHORT).show()
+                return@evaluateActiveWebViewSelectedText
             }
+            val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("web_selection", selectedText))
+            clearActiveWebViewSelection()
+        }
+    }
+
+    private fun evaluateActiveWebViewSelectedText(onResult: (String) -> Unit) {
+        val webView = webViewHost.currentWebView() ?: return
+        webView.evaluateJavascript(activeWebViewSelectionTextScript()) { rawValue ->
+            try {
+                val selectedText = JSONTokener(rawValue).nextValue() as String
+                onResult(selectedText)
+            } catch (e: Exception) {
+                AppLogger.e("WebSessionBrowserHost", "Failed to read selected WebView text", e)
+            }
+        }
+    }
+
+    private fun activeWebViewSelectionTextScript(): String =
+        """
+        (function() {
+            return String(window.__operitTextSelection.getText());
+        })();
+        """.trimIndent()
+
+    private fun selectAllActiveWebViewText() {
+        val webView = webViewHost.currentWebView() ?: return
+        webView.evaluateJavascript(
+            """
+            (function() {
+                window.__operitTextSelection.selectAll();
+            })();
+            """.trimIndent(),
+            null
+        )
+    }
+
+    private fun dismissTextSelectionActions() {
+        clearActiveWebViewSelection()
+    }
+
+    private fun clearActiveWebViewSelection() {
+        val webView = webViewHost.currentWebView() ?: return
+        webView.evaluateJavascript(
+            """
+            (function() {
+                window.__operitTextSelection.clear();
+            })();
+            """.trimIndent(),
+            null
+        )
+        hideTextSelectionActionsOverlay()
+    }
+
+    private fun createTextSelectionActionsView(): View {
+        val density = appContext.resources.displayMetrics.density
+        val cornerRadius = (12f * density)
+        val horizontalPadding = (4f * density).roundToInt()
+        val verticalPadding = (2f * density).roundToInt()
+
+        return LinearLayout(appContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
+            background =
+                GradientDrawable().apply {
+                    setColor(0xF2242424.toInt())
+                    setCornerRadius(cornerRadius)
+                    setStroke(dp(1), 0x33FFFFFF)
+                }
+            elevation = 10f * density
+
+            addView(
+                createTextSelectionActionButton(appContext.getString(R.string.copy)) {
+                    copyActiveWebViewSelection()
+                }
+            )
+            addView(
+                createTextSelectionActionButton(appContext.getString(android.R.string.selectAll)) {
+                    selectAllActiveWebViewText()
+                }
+            )
+            addView(
+                createTextSelectionActionButton(appContext.getString(R.string.cancel)) {
+                    dismissTextSelectionActions()
+                }
+            )
+        }
+    }
+
+    private fun createTextSelectionActionButton(
+        label: String,
+        onClick: () -> Unit
+    ): TextView =
+        TextView(appContext).apply {
+            text = label
+            setTextColor(AndroidColor.WHITE)
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setIncludeFontPadding(false)
+            setMinWidth(0)
+            setMinHeight(dp(38))
+            setPadding(dp(14), 0, dp(14), 0)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+
+    private fun createTextSelectionActionsLayoutParams(): WindowManager.LayoutParams =
+        WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+
+    private fun updateTextSelectionActionsLayout(
+        actionsView: View,
+        anchorX: Double,
+        anchorY: Double
+    ) {
+        val params = selectionActionsParams ?: return
+        val webView = webViewHost.currentWebView() ?: return
+        if (actionsView.measuredWidth == 0 || actionsView.measuredHeight == 0) {
+            actionsView.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+        }
+
+        val location = IntArray(2)
+        webView.getLocationOnScreen(location)
+        val scale = webView.scale
+        val width = actionsView.measuredWidth
+        val height = actionsView.measuredHeight
+        val metrics = appContext.resources.displayMetrics
+        val margin = dp(10)
+        val screenX = (location[0] + anchorX * scale).roundToInt()
+        val selectionTop = (location[1] + anchorY * scale).roundToInt()
+        val aboveY = selectionTop - height - margin
+        val belowY = selectionTop + dp(28)
+        val maxX = (metrics.widthPixels - width - margin).coerceAtLeast(margin)
+        val maxY = (metrics.heightPixels - height - margin).coerceAtLeast(margin)
+
+        params.x = (screenX - width / 2).coerceIn(margin, maxX)
+        params.y =
+            if (aboveY >= margin) {
+                aboveY
+            } else {
+                belowY.coerceIn(margin, maxY)
+            }
+
+        selectionActionsParams = params
+        if (actionsView.windowToken != null) {
+            windowManager.updateViewLayout(actionsView, params)
         }
     }
 

@@ -23,5 +23,10 @@ data class MemoryAutoSaveCandidate(
         const val STATUS_FAILED = "failed"
 
         const val SOURCE_TYPE_REPLY_FINALIZED_AUTO = "reply_finalized_auto"
+        const val SOURCE_TYPE_SELECTED_USER_MESSAGE = "selected_user_message"
+
+        fun isSelectedUserMessageSource(sourceType: String): Boolean {
+            return sourceType == SOURCE_TYPE_SELECTED_USER_MESSAGE
+        }
     }
 }

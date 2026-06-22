@@ -439,31 +439,31 @@ function Screen(ctx) {
             text: TEXT.connectionStateIdle,
             containerColor: "surfaceVariant",
             contentColor: "onSurfaceVariant",
-            icon: "computer"
+            icon: Icons.Computer
         },
         checking: {
             text: TEXT.connectionStateChecking,
             containerColor: "tertiaryContainer",
             contentColor: "onTertiaryContainer",
-            icon: "settings"
+            icon: Icons.Sync
         },
         notConfigured: {
             text: TEXT.connectionStateNotConfigured,
             containerColor: "secondaryContainer",
             contentColor: "onSecondaryContainer",
-            icon: "settings"
+            icon: Icons.Settings
         },
         success: {
             text: TEXT.connectionStateSuccess,
             containerColor: "primaryContainer",
             contentColor: "onPrimaryContainer",
-            icon: "checkCircle"
+            icon: Icons.CheckCircle
         },
         failed: {
             text: TEXT.connectionStateFailed,
             containerColor: "errorContainer",
             contentColor: "onErrorContainer",
-            icon: "error"
+            icon: Icons.Error
         }
     };
     const currentStatusUi = statusConfigByStatus[connectionCardState.value.status];

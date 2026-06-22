@@ -29,6 +29,7 @@ data class PromptHookMutation(
     val preparedHistory: List<PromptTurn>? = null,
     val systemPrompt: String? = null,
     val toolPrompt: String? = null,
+    val availableTools: List<Map<String, Any?>>? = null,
     val metadata: Map<String, Any?> = emptyMap()
 )
 
@@ -267,6 +268,7 @@ object PromptHookRegistry {
             preparedHistory = mutation.preparedHistory ?: current.preparedHistory,
             systemPrompt = mutation.systemPrompt ?: current.systemPrompt,
             toolPrompt = mutation.toolPrompt ?: current.toolPrompt,
+            availableTools = mutation.availableTools ?: current.availableTools,
             metadata = mergedMetadata
         )
     }

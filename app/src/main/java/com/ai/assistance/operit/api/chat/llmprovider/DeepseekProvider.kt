@@ -133,17 +133,22 @@ class DeepseekProvider(
             }
         }
 
+        val providerReadyHistory = prepareHistoryForProvider(chatHistory, effectiveEnableToolCall)
+        calculateAndStoreInputTokens(
+            providerReadyHistory,
+            toolsJson,
+            preserveThinkInHistory = true
+        )
+
         // 使用特殊的消息构建方法（支持reasoning_content）
         val messagesArray =
             buildMessagesWithReasoning(
                 context,
-                chatHistory,
+                providerReadyHistory,
                 effectiveEnableToolCall
             )
         jsonObject.put("messages", messagesArray)
 
-        // ⚠️ 重要：调用 TokenCacheManager 计算输入 token 数量
-        // 虽然 buildMessagesWithReasoning 不返回 token 计数，但我们需要更新缓存管理器的状态
         // 记录最终的请求体（省略过长的tools字段）
         val logJson = JSONObject(jsonObject.toString())
         if (logJson.has("tools")) {
@@ -162,11 +167,10 @@ class DeepseekProvider(
      */
     private fun buildMessagesWithReasoning(
         context: Context,
-        chatHistory: List<PromptTurn>,
+        effectiveHistory: List<PromptTurn>,
         useToolCall: Boolean
     ): JSONArray {
         val messagesArray = JSONArray()
-        val effectiveHistory = prepareHistoryForProvider(chatHistory, useToolCall)
 
         var queuedAssistantToolText: String? = null
         var queuedAssistantReasoning: String? = null

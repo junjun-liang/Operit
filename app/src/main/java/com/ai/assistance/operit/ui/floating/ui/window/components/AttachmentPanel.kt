@@ -26,13 +26,17 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.ScreenshotMonitor
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import com.ai.assistance.operit.R
@@ -42,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ai.assistance.operit.ui.features.chat.components.PackageSelectorDialog
 
 /**
  * 专为浮动窗口设计的简化附件选择面板
@@ -55,8 +60,11 @@ fun FloatingAttachmentPanel(
     onAttachNotifications: () -> Unit,
     onAttachLocation: () -> Unit,
     onAttachScreenOcr: () -> Unit,
+    onAttachPackage: (String) -> Unit = {},
     onDismiss: () -> Unit
 ) {
+    var showPackageDialog by remember { mutableStateOf(false) }
+
     // 定义附件选项列表，便于使用LazyRow
     val attachmentOptions = listOf(
         AttachmentOptionData(
@@ -78,6 +86,12 @@ fun FloatingAttachmentPanel(
             icon = Icons.Default.Crop,
             label = stringResource(R.string.screen_ocr_select),
             onClick = onAttachScreenOcr
+        ),
+        AttachmentOptionData(
+            icon = Icons.Default.AutoAwesome,
+            label = stringResource(R.string.attachment_package),
+            onClick = { showPackageDialog = true },
+            dismissPanelOnClick = false
         )
     )
 
@@ -125,7 +139,9 @@ fun FloatingAttachmentPanel(
                             label = option.label,
                             onClick = {
                                 option.onClick()
-                                onDismiss()
+                                if (option.dismissPanelOnClick) {
+                                    onDismiss()
+                                }
                             }
                         )
                     }
@@ -148,13 +164,24 @@ fun FloatingAttachmentPanel(
             }
         }
     }
+
+    PackageSelectorDialog(
+        visible = showPackageDialog,
+        onDismiss = { showPackageDialog = false },
+        onPackageSelected = { packageName ->
+            onAttachPackage(packageName)
+            showPackageDialog = false
+            onDismiss()
+        }
+    )
 }
 
 // 附件选项数据类
 private data class AttachmentOptionData(
     val icon: ImageVector,
     val label: String,
-    val onClick: () -> Unit
+    val onClick: () -> Unit,
+    val dismissPanelOnClick: Boolean = true
 )
 
 @Composable

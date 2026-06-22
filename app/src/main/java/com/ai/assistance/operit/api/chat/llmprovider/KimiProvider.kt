@@ -19,7 +19,7 @@ import org.json.JSONObject
  * Kimi K2.5 Provider (Moonshot API).
  * Mirrors DeepseekProvider behavior for reasoning_content handling when thinking is enabled.
  */
-class KimiProvider(
+open class KimiProvider(
     apiEndpoint: String,
     apiKeyProvider: ApiKeyProvider,
     modelName: String,
@@ -119,10 +119,16 @@ class KimiProvider(
             }
         }
 
+        val providerReadyHistory = prepareHistoryForProvider(chatHistory, effectiveEnableToolCall)
+        calculateAndStoreInputTokens(
+            providerReadyHistory,
+            toolsJson,
+            preserveThinkInHistory = true
+        )
         val messagesArray =
             buildMessagesWithReasoning(
                 context,
-                chatHistory,
+                providerReadyHistory,
                 effectiveEnableToolCall
             )
         jsonObject.put("messages", messagesArray)
@@ -140,11 +146,10 @@ class KimiProvider(
 
     private fun buildMessagesWithReasoning(
         context: Context,
-        chatHistory: List<PromptTurn>,
+        effectiveHistory: List<PromptTurn>,
         useToolCall: Boolean
     ): JSONArray {
         val messagesArray = JSONArray()
-        val effectiveHistory = prepareHistoryForProvider(chatHistory, useToolCall)
 
         var queuedAssistantToolText: String? = null
         var queuedAssistantReasoning: String? = null

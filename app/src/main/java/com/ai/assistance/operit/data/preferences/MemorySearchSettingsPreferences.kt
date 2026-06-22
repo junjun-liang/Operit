@@ -52,6 +52,10 @@ class MemorySearchSettingsPreferences(context: Context, profileId: String) {
             minutes.coerceIn(MIN_AUTO_SAVE_INTERVAL_MINUTES, MAX_AUTO_SAVE_INTERVAL_MINUTES)
         searchPrefs.edit()
             .putInt(KEY_AUTO_SAVE_INTERVAL_MINUTES, normalized)
+            .putLong(
+                KEY_NEXT_AUTO_SAVE_RUN_AT_MS,
+                System.currentTimeMillis() + normalized * 60_000L
+            )
             .apply()
     }
 
@@ -102,8 +106,8 @@ class MemorySearchSettingsPreferences(context: Context, profileId: String) {
         private const val KEY_CLOUD_API_KEY = "api_key"
         private const val KEY_CLOUD_MODEL = "model"
 
-        const val DEFAULT_AUTO_SAVE_INTERVAL_MINUTES = 15
+        const val DEFAULT_AUTO_SAVE_INTERVAL_MINUTES = 5
         const val MIN_AUTO_SAVE_INTERVAL_MINUTES = 1
-        const val MAX_AUTO_SAVE_INTERVAL_MINUTES = 180
+        const val MAX_AUTO_SAVE_INTERVAL_MINUTES = 30
     }
 }

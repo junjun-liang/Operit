@@ -82,6 +82,29 @@ internal class BrowserAsyncBridge {
     }
 }
 
+internal class BrowserTextSelectionBridge {
+    @JavascriptInterface
+    fun showActions(anchorX: Double, anchorY: Double) {
+        StandardBrowserSessionTools.mainHandler.post {
+            StandardBrowserSessionTools.browserHost?.showTextSelectionActionsOverlay(anchorX, anchorY)
+        }
+    }
+
+    @JavascriptInterface
+    fun performHapticFeedback() {
+        StandardBrowserSessionTools.mainHandler.post {
+            StandardBrowserSessionTools.browserHost?.performTextSelectionHaptic()
+        }
+    }
+
+    @JavascriptInterface
+    fun hideActions() {
+        StandardBrowserSessionTools.mainHandler.post {
+            StandardBrowserSessionTools.browserHost?.hideTextSelectionActionsOverlay()
+        }
+    }
+}
+
 internal fun StandardBrowserSessionTools.createDownloadListener(
     session: BrowserToolSession
 ): DownloadListener {
@@ -145,6 +168,701 @@ internal fun StandardBrowserSessionTools.createDownloadListener(
             }
         }
     }
+}
+
+internal fun StandardBrowserSessionTools.injectTextSelectionHelper(webView: WebView) {
+    val script =
+        """
+        (function() {
+            if (window.__operitTextSelectionHelperInjected) {
+                return;
+            }
+            window.__operitTextSelectionHelperInjected = true;
+
+            const uiAttribute = "data-operit-selection-ui";
+            const state = {
+                longPressTimer: null,
+                longPressArmed: false,
+                startX: 0,
+                startY: 0,
+                range: null,
+                control: null,
+                selectedText: "",
+                overlay: null,
+                highlights: [],
+                startHandle: null,
+                endHandle: null,
+                draggingHandle: "",
+                dragFrame: 0,
+                dragX: 0,
+                dragY: 0,
+                dragAdjustX: 0,
+                dragAdjustY: 0
+            };
+
+            function clearLongPressTimer() {
+                if (state.longPressTimer !== null) {
+                    clearTimeout(state.longPressTimer);
+                    state.longPressTimer = null;
+                }
+            }
+
+            function isSelectionUiTarget(target) {
+                return !!target && !!target.closest && !!target.closest("[" + uiAttribute + "='true']");
+            }
+
+            function isEditableTextControl(element) {
+                return !!element &&
+                    (element.tagName === "TEXTAREA" ||
+                        (element.tagName === "INPUT" &&
+                            !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(element.type || "")));
+            }
+
+            function clearNativeSelection() {
+                const selection = window.getSelection();
+                if (selection) {
+                    selection.removeAllRanges();
+                }
+            }
+
+            function performHapticFeedback() {
+                window.OperitTextSelectionBridge.performHapticFeedback();
+            }
+
+            function ensureOverlay() {
+                if (state.overlay && state.overlay.parentNode) {
+                    return state.overlay;
+                }
+                const overlay = document.createElement("div");
+                overlay.setAttribute(uiAttribute, "true");
+                overlay.style.position = "fixed";
+                overlay.style.left = "0";
+                overlay.style.top = "0";
+                overlay.style.right = "0";
+                overlay.style.bottom = "0";
+                overlay.style.pointerEvents = "none";
+                overlay.style.zIndex = "2147483647";
+                overlay.style.contain = "layout style paint";
+                document.documentElement.appendChild(overlay);
+                state.overlay = overlay;
+                return overlay;
+            }
+
+            function rangeFromPoint(x, y) {
+                const previousStartPointerEvents = state.startHandle ? state.startHandle.style.pointerEvents : "";
+                const previousEndPointerEvents = state.endHandle ? state.endHandle.style.pointerEvents : "";
+                if (state.startHandle) {
+                    state.startHandle.style.pointerEvents = "none";
+                }
+                if (state.endHandle) {
+                    state.endHandle.style.pointerEvents = "none";
+                }
+                let pointRange = null;
+                if (document.caretRangeFromPoint) {
+                    pointRange = document.caretRangeFromPoint(x, y);
+                } else if (document.caretPositionFromPoint) {
+                    const position = document.caretPositionFromPoint(x, y);
+                    if (position) {
+                        pointRange = document.createRange();
+                        pointRange.setStart(position.offsetNode, position.offset);
+                        pointRange.collapse(true);
+                    }
+                }
+                if (state.startHandle) {
+                    state.startHandle.style.pointerEvents = previousStartPointerEvents;
+                }
+                if (state.endHandle) {
+                    state.endHandle.style.pointerEvents = previousEndPointerEvents;
+                }
+                return pointRange;
+            }
+
+            function isSelectableCharacter(character) {
+                return !!character && !/[\s.,!?;:()[\]{}"']/.test(character);
+            }
+
+            function wordRangeFromPointRange(pointRange) {
+                const node = pointRange ? pointRange.startContainer : null;
+                if (!node || node.nodeType !== Node.TEXT_NODE) {
+                    return null;
+                }
+                const text = String(node.textContent || "");
+                if (!text.trim()) {
+                    return null;
+                }
+
+                let cursor = Math.max(0, Math.min(pointRange.startOffset, text.length));
+                if (cursor === text.length && cursor > 0) {
+                    cursor -= 1;
+                }
+                if (!isSelectableCharacter(text.charAt(cursor)) && cursor > 0 && isSelectableCharacter(text.charAt(cursor - 1))) {
+                    cursor -= 1;
+                }
+
+                let start = cursor;
+                let end = cursor + 1;
+                while (start > 0 && isSelectableCharacter(text.charAt(start - 1))) {
+                    start -= 1;
+                }
+                while (end < text.length && isSelectableCharacter(text.charAt(end))) {
+                    end += 1;
+                }
+
+                if (start >= end || !text.slice(start, end).trim()) {
+                    return null;
+                }
+
+                const range = document.createRange();
+                range.setStart(node, start);
+                range.setEnd(node, end);
+                return range;
+            }
+
+            function textNodeFromElement(element, x, y) {
+                if (!element) {
+                    return null;
+                }
+                const walker = document.createTreeWalker(
+                    element,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(node) {
+                            const text = String(node.textContent || "");
+                            if (!text.trim()) {
+                                return NodeFilter.FILTER_REJECT;
+                            }
+
+                            const range = document.createRange();
+                            range.selectNodeContents(node);
+                            const rects = range.getClientRects();
+                            for (let index = 0; index < rects.length; index += 1) {
+                                const rect = rects[index];
+                                if (
+                                    x >= rect.left &&
+                                    x <= rect.right &&
+                                    y >= rect.top &&
+                                    y <= rect.bottom
+                                ) {
+                                    return NodeFilter.FILTER_ACCEPT;
+                                }
+                            }
+                            return NodeFilter.FILTER_SKIP;
+                        }
+                    }
+                );
+                return walker.nextNode();
+            }
+
+            function clearVisuals() {
+                state.highlights.forEach(function(highlight) {
+                    if (highlight.parentNode) {
+                        highlight.parentNode.removeChild(highlight);
+                    }
+                });
+                state.highlights = [];
+                [state.startHandle, state.endHandle].forEach(function(handle) {
+                    if (handle && handle.parentNode) {
+                        handle.parentNode.removeChild(handle);
+                    }
+                });
+                state.startHandle = null;
+                state.endHandle = null;
+            }
+
+            function selectionRects(range) {
+                const rects = Array.from(range.getClientRects())
+                    .filter(function(rect) {
+                        return rect.width > 0 && rect.height > 0;
+                    });
+                if (rects.length > 0) {
+                    return rects;
+                }
+                const rect = range.getBoundingClientRect();
+                if (rect.width > 0 || rect.height > 0) {
+                    return [rect];
+                }
+                return [];
+            }
+
+            function unionRects(rects) {
+                let left = rects[0].left;
+                let top = rects[0].top;
+                let right = rects[0].right;
+                let bottom = rects[0].bottom;
+                rects.forEach(function(rect) {
+                    left = Math.min(left, rect.left);
+                    top = Math.min(top, rect.top);
+                    right = Math.max(right, rect.right);
+                    bottom = Math.max(bottom, rect.bottom);
+                });
+                return { left: left, top: top, right: right, bottom: bottom };
+            }
+
+            function setHighlightRect(highlight, rect) {
+                highlight.setAttribute(uiAttribute, "true");
+                highlight.style.position = "fixed";
+                highlight.style.left = rect.left + "px";
+                highlight.style.top = rect.top + "px";
+                highlight.style.width = rect.width + "px";
+                highlight.style.height = rect.height + "px";
+                highlight.style.backgroundColor = "rgba(25, 118, 210, 0.32)";
+                highlight.style.borderRadius = "2px";
+                highlight.style.pointerEvents = "none";
+            }
+
+            function renderHighlights(rects) {
+                const overlay = ensureOverlay();
+                rects.forEach(function(rect, index) {
+                    let highlight = state.highlights[index];
+                    if (!highlight) {
+                        highlight = document.createElement("div");
+                        highlight.setAttribute(uiAttribute, "true");
+                        overlay.appendChild(highlight);
+                        state.highlights[index] = highlight;
+                    }
+                    setHighlightRect(highlight, rect);
+                });
+                while (state.highlights.length > rects.length) {
+                    const highlight = state.highlights.pop();
+                    if (highlight && highlight.parentNode) {
+                        highlight.parentNode.removeChild(highlight);
+                    }
+                }
+            }
+
+            function createHandleElement(kind) {
+                const overlay = ensureOverlay();
+                const handle = document.createElement("div");
+                const knob = document.createElement("div");
+                const stem = document.createElement("div");
+                handle.setAttribute(uiAttribute, "true");
+                knob.setAttribute(uiAttribute, "true");
+                stem.setAttribute(uiAttribute, "true");
+                handle.style.position = "fixed";
+                handle.style.width = "32px";
+                handle.style.pointerEvents = "auto";
+                handle.style.touchAction = "none";
+                stem.style.position = "absolute";
+                stem.style.left = "15px";
+                stem.style.top = "0";
+                stem.style.width = "2px";
+                stem.style.backgroundColor = "#1976d2";
+                stem.style.borderRadius = "2px";
+                knob.style.position = "absolute";
+                knob.style.left = "8px";
+                knob.style.width = "16px";
+                knob.style.height = "16px";
+                knob.style.borderRadius = "50%";
+                knob.style.backgroundColor = "#1976d2";
+                knob.style.boxShadow = "0 1px 4px rgba(0,0,0,0.35)";
+                handle.appendChild(stem);
+                handle.appendChild(knob);
+                handle.addEventListener("touchstart", function(event) {
+                    const point = eventPoint(event);
+                    const rect = handle.__operitBoundaryRect;
+                    const boundaryX = handle.__operitBoundaryX;
+                    const boundaryY = rect.top + rect.height / 2;
+                    state.draggingHandle = kind;
+                    state.dragAdjustX = boundaryX - point.x;
+                    state.dragAdjustY = boundaryY - point.y;
+                    window.OperitTextSelectionBridge.hideActions();
+                    performHapticFeedback();
+                    event.preventDefault();
+                    event.stopPropagation();
+                }, { capture: true, passive: false });
+                overlay.appendChild(handle);
+                return handle;
+            }
+
+            function updateHandle(kind, rect) {
+                let handle = kind === "start" ? state.startHandle : state.endHandle;
+                if (!handle || !handle.parentNode) {
+                    handle = createHandleElement(kind);
+                    if (kind === "start") {
+                        state.startHandle = handle;
+                    } else {
+                        state.endHandle = handle;
+                    }
+                }
+                const handleHeight = Math.max(30, rect.height + 18);
+                handle.style.height = handleHeight + "px";
+                handle.style.left = (kind === "start" ? rect.left - 16 : rect.right - 16) + "px";
+                handle.style.top = rect.top + "px";
+                handle.__operitBoundaryRect = rect;
+                handle.__operitBoundaryX = kind === "start" ? rect.left : rect.right;
+                const stem = handle.firstChild;
+                const knob = handle.lastChild;
+                stem.style.height = Math.max(1, rect.height + 7) + "px";
+                knob.style.top = Math.max(0, rect.height - 1) + "px";
+            }
+
+            function showActionsForRect(rect) {
+                const anchorX = (rect.left + rect.right) / 2;
+                const anchorY = rect.top;
+                window.OperitTextSelectionBridge.showActions(anchorX, anchorY);
+            }
+
+            function renderRangeSelection(showActions) {
+                if (!state.range) {
+                    clearVisuals();
+                    clearNativeSelection();
+                    return;
+                }
+                const rects = selectionRects(state.range);
+                if (rects.length === 0) {
+                    clearVisuals();
+                    clearNativeSelection();
+                    return;
+                }
+                renderHighlights(rects);
+                updateHandle("start", rects[0]);
+                updateHandle("end", rects[rects.length - 1]);
+                state.selectedText = String(state.range.toString() || "");
+                clearNativeSelection();
+                if (showActions) {
+                    showActionsForRect(unionRects(rects));
+                }
+            }
+
+            function renderControlSelection(showActions) {
+                const control = state.control;
+                if (!control) {
+                    clearVisuals();
+                    clearNativeSelection();
+                    return;
+                }
+                const rect = control.getBoundingClientRect();
+                renderHighlights([rect]);
+                updateHandle("start", rect);
+                updateHandle("end", rect);
+                if (showActions) {
+                    showActionsForRect(rect);
+                }
+            }
+
+            function selectRange(range) {
+                const text = String(range.toString() || "");
+                if (!text.trim()) {
+                    return false;
+                }
+                clearOperitSelection(false);
+                state.range = range.cloneRange();
+                state.control = null;
+                state.selectedText = text;
+                renderRangeSelection(true);
+                performHapticFeedback();
+                return true;
+            }
+
+            function selectControlContents(control) {
+                const text = String(control.value || "");
+                if (!text.trim()) {
+                    return false;
+                }
+                clearOperitSelection(false);
+                control.focus();
+                control.setSelectionRange(0, text.length);
+                state.control = control;
+                state.range = null;
+                state.selectedText = text;
+                renderControlSelection(true);
+                performHapticFeedback();
+                return true;
+            }
+
+            function selectAtPoint(x, y) {
+                const element = document.elementFromPoint(x, y);
+                const control =
+                    isEditableTextControl(element)
+                        ? element
+                        : element && element.closest
+                            ? element.closest("input, textarea")
+                            : null;
+                if (
+                    isEditableTextControl(control) &&
+                    typeof control.setSelectionRange === "function"
+                ) {
+                    selectControlContents(control);
+                    return;
+                }
+
+                const pointRange = rangeFromPoint(x, y);
+                const wordRange = wordRangeFromPointRange(pointRange);
+                if (wordRange && selectRange(wordRange)) {
+                    return;
+                }
+
+                const textNode = textNodeFromElement(element, x, y);
+                if (textNode) {
+                    const range = document.createRange();
+                    range.selectNodeContents(textNode);
+                    selectRange(range);
+                }
+            }
+
+            function compareBoundaryPoint(nodeA, offsetA, nodeB, offsetB) {
+                const pointA = document.createRange();
+                const pointB = document.createRange();
+                pointA.setStart(nodeA, offsetA);
+                pointA.collapse(true);
+                pointB.setStart(nodeB, offsetB);
+                pointB.collapse(true);
+                return pointA.compareBoundaryPoints(Range.START_TO_START, pointB);
+            }
+
+            function updateDraggedSelection(x, y) {
+                if (!state.range || !state.draggingHandle) {
+                    return;
+                }
+                const pointRange = rangeFromPoint(x, y);
+                if (!pointRange) {
+                    return;
+                }
+                const current = state.range;
+                const nextRange = document.createRange();
+                if (state.draggingHandle === "start") {
+                    const order = compareBoundaryPoint(
+                        pointRange.startContainer,
+                        pointRange.startOffset,
+                        current.endContainer,
+                        current.endOffset
+                    );
+                    if (order <= 0) {
+                        nextRange.setStart(pointRange.startContainer, pointRange.startOffset);
+                        nextRange.setEnd(current.endContainer, current.endOffset);
+                    } else {
+                        nextRange.setStart(current.endContainer, current.endOffset);
+                        nextRange.setEnd(pointRange.startContainer, pointRange.startOffset);
+                        state.draggingHandle = "end";
+                    }
+                } else {
+                    const order = compareBoundaryPoint(
+                        current.startContainer,
+                        current.startOffset,
+                        pointRange.startContainer,
+                        pointRange.startOffset
+                    );
+                    if (order <= 0) {
+                        nextRange.setStart(current.startContainer, current.startOffset);
+                        nextRange.setEnd(pointRange.startContainer, pointRange.startOffset);
+                    } else {
+                        nextRange.setStart(pointRange.startContainer, pointRange.startOffset);
+                        nextRange.setEnd(current.startContainer, current.startOffset);
+                        state.draggingHandle = "start";
+                    }
+                }
+                if (!String(nextRange.toString() || "").trim()) {
+                    return;
+                }
+                state.range = nextRange;
+                renderRangeSelection(false);
+            }
+
+            function scheduleDraggedSelection(x, y) {
+                state.dragX = x + state.dragAdjustX;
+                state.dragY = y + state.dragAdjustY;
+                if (state.dragFrame) {
+                    return;
+                }
+                state.dragFrame = requestAnimationFrame(function() {
+                    state.dragFrame = 0;
+                    updateDraggedSelection(state.dragX, state.dragY);
+                });
+            }
+
+            function eventPoint(event) {
+                const touch =
+                    event.touches && event.touches.length > 0
+                        ? event.touches[0]
+                        : event.changedTouches && event.changedTouches.length > 0
+                            ? event.changedTouches[0]
+                            : null;
+                if (touch) {
+                    return { x: touch.clientX, y: touch.clientY };
+                }
+                return { x: event.clientX, y: event.clientY };
+            }
+
+            function selectedControlText() {
+                const control = state.control;
+                if (
+                    control &&
+                    typeof control.selectionStart === "number" &&
+                    typeof control.selectionEnd === "number"
+                ) {
+                    return String(control.value || "").slice(control.selectionStart, control.selectionEnd);
+                }
+                return state.selectedText;
+            }
+
+            function selectAllText() {
+                const active = document.activeElement;
+                if (
+                    isEditableTextControl(active) &&
+                    typeof active.setSelectionRange === "function"
+                ) {
+                    selectControlContents(active);
+                    return;
+                }
+                const body = document.body;
+                if (!body) {
+                    return;
+                }
+                const range = document.createRange();
+                range.selectNodeContents(body);
+                selectRange(range);
+            }
+
+            function clearOperitSelection(hideActions) {
+                if (state.dragFrame) {
+                    cancelAnimationFrame(state.dragFrame);
+                    state.dragFrame = 0;
+                }
+                clearVisuals();
+                state.range = null;
+                state.control = null;
+                state.selectedText = "";
+                const active = document.activeElement;
+                if (
+                    isEditableTextControl(active) &&
+                    typeof active.selectionEnd === "number" &&
+                    typeof active.setSelectionRange === "function"
+                ) {
+                    const end = active.selectionEnd;
+                    active.setSelectionRange(end, end);
+                }
+                clearNativeSelection();
+                if (hideActions) {
+                    window.OperitTextSelectionBridge.hideActions();
+                }
+            }
+
+            window.__operitTextSelection = {
+                getText: function() {
+                    return selectedControlText();
+                },
+                clear: function() {
+                    clearOperitSelection(true);
+                },
+                selectAll: function() {
+                    selectAllText();
+                }
+            };
+
+            document.addEventListener("touchstart", function(event) {
+                if (isSelectionUiTarget(event.target)) {
+                    return;
+                }
+                clearLongPressTimer();
+                state.longPressArmed = false;
+                if (state.selectedText) {
+                    clearOperitSelection(true);
+                }
+                if (!event.touches || event.touches.length !== 1) {
+                    return;
+                }
+                const touch = event.touches[0];
+                state.startX = touch.clientX;
+                state.startY = touch.clientY;
+                state.longPressTimer = setTimeout(function() {
+                    state.longPressTimer = null;
+                    state.longPressArmed = true;
+                    selectAtPoint(state.startX, state.startY);
+                }, 560);
+            }, { capture: true, passive: false });
+
+            document.addEventListener("touchmove", function(event) {
+                if (state.draggingHandle) {
+                    const point = eventPoint(event);
+                    scheduleDraggedSelection(point.x, point.y);
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                if (!event.touches || event.touches.length !== 1) {
+                    clearLongPressTimer();
+                    return;
+                }
+                if (state.longPressArmed) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                const touch = event.touches[0];
+                const dx = touch.clientX - state.startX;
+                const dy = touch.clientY - state.startY;
+                if (dx * dx + dy * dy > 144) {
+                    clearLongPressTimer();
+                }
+            }, { capture: true, passive: false });
+
+            document.addEventListener("touchend", function(event) {
+                if (state.draggingHandle) {
+                    if (state.dragFrame) {
+                        cancelAnimationFrame(state.dragFrame);
+                        state.dragFrame = 0;
+                        updateDraggedSelection(state.dragX, state.dragY);
+                    }
+                    state.draggingHandle = "";
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (state.range) {
+                        renderRangeSelection(true);
+                    }
+                    return;
+                }
+                clearLongPressTimer();
+                if (state.longPressArmed || state.selectedText) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setTimeout(clearNativeSelection, 0);
+                }
+                state.longPressArmed = false;
+            }, { capture: true, passive: false });
+
+            document.addEventListener("touchcancel", function() {
+                clearLongPressTimer();
+                state.longPressArmed = false;
+                if (state.dragFrame) {
+                    cancelAnimationFrame(state.dragFrame);
+                    state.dragFrame = 0;
+                }
+                state.draggingHandle = "";
+            }, { capture: true, passive: false });
+
+            document.addEventListener("contextmenu", function(event) {
+                if (state.selectedText) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }, true);
+
+            document.addEventListener("selectionchange", function() {
+                if (state.selectedText) {
+                    setTimeout(clearNativeSelection, 0);
+                }
+            }, true);
+
+            document.addEventListener("scroll", function() {
+                if (state.range) {
+                    renderRangeSelection(true);
+                } else if (state.control) {
+                    renderControlSelection(true);
+                }
+            }, true);
+
+            window.addEventListener("resize", function() {
+                if (state.range) {
+                    renderRangeSelection(true);
+                } else if (state.control) {
+                    renderControlSelection(true);
+                }
+            }, true);
+        })();
+        """.trimIndent()
+
+    runCatching { webView.evaluateJavascript(script, null) }
+        .onFailure { AppLogger.w(EXECUTION_SUPPORT_TAG, "Failed to inject text selection helper: ${it.message}") }
 }
 
 internal fun StandardBrowserSessionTools.handleRegularDownload(

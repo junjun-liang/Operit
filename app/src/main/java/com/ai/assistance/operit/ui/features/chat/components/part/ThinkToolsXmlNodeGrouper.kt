@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.preferences.ToolCollapseMode
@@ -172,7 +173,8 @@ class ThinkToolsXmlNodeGrouper(
         onLinkClick: ((String) -> Unit)?,
         xmlRenderer: XmlContentRenderer,
         xmlStreamResolver: (Int) -> Stream<String>?,
-        fillMaxWidth: Boolean
+        fillMaxWidth: Boolean,
+        fontSize: TextUnit
     ) {
         val alpha = if (forceExpandGroups) {
             1f

@@ -36,6 +36,7 @@ import com.ai.assistance.operit.ui.features.packages.market.GitHubIssueMarketDef
 import com.ai.assistance.operit.ui.features.packages.market.GitHubIssueMarketService
 import com.ai.assistance.operit.ui.features.packages.market.IssueInteractionController
 import com.ai.assistance.operit.ui.features.packages.market.IssueInteractionMessages
+import com.ai.assistance.operit.ui.features.packages.market.MARKET_REVIEW_STATUS_LABELS
 import com.ai.assistance.operit.ui.features.packages.market.MarketEntryStats
 import com.ai.assistance.operit.ui.features.packages.market.SkillMarketBrowseItem
 import com.ai.assistance.operit.ui.features.packages.market.MarketSortOption
@@ -45,6 +46,7 @@ import com.ai.assistance.operit.ui.features.packages.market.loadMarketStatsMap
 import com.ai.assistance.operit.ui.features.packages.market.normalizeMarketArtifactId
 import com.ai.assistance.operit.ui.features.packages.utils.IssueBodyMetadataParser
 import com.ai.assistance.operit.ui.features.packages.market.resolveMarketDownloadTarget
+import com.ai.assistance.operit.ui.features.packages.market.resolveSkillReviewSnapshot
 import com.ai.assistance.operit.ui.features.packages.market.resolveSkillMarketEntryId
 import com.ai.assistance.operit.ui.features.packages.market.toMarketEntryStats
 import com.ai.assistance.operit.ui.features.packages.market.toRankMetric
@@ -246,13 +248,21 @@ class SkillMarketViewModel(
         }
 
         try {
-            val result = marketService.searchOpenIssues(rawQuery = rawQuery, page = 1)
+            val result = marketService.searchIssues(
+                rawQuery = rawQuery,
+                page = 1,
+                openOnly = true,
+                excludedLabels = MARKET_REVIEW_STATUS_LABELS.toList()
+            )
 
             if (rawQuery != _searchQuery.value.trim()) return
 
             result.fold(
                 onSuccess = { issues ->
-                    _searchResultItems.value = issues.map { it.toSkillMarketBrowseItem() }
+                    _searchResultItems.value =
+                        issues
+                            .filter { issue -> issue.resolveSkillReviewSnapshot().isPubliclyApproved }
+                            .map { it.toSkillMarketBrowseItem() }
                 },
                 onFailure = { error ->
                     val msg = error.message ?: "Unknown error"
@@ -513,8 +523,7 @@ class SkillMarketViewModel(
                 }
 
                 val finalResult = marketService.getUserPublishedIssues(
-                    creator = userInfo.login,
-                    fallbackWithoutLabel = true
+                    creator = userInfo.login
                 )
 
                 finalResult.fold(
@@ -601,7 +610,9 @@ class SkillMarketViewModel(
     ): Result<Unit> {
         return try {
             if (!githubAuth.isLoggedIn()) {
-                return Result.failure(IllegalStateException("GitHub 登录后才能发布 Skill。"))
+                return Result.failure(
+                    IllegalStateException(context.getString(R.string.skill_publish_login_required))
+                )
             }
 
             ensureSkillTitleAvailable(title = title)
@@ -633,7 +644,10 @@ class SkillMarketViewModel(
                     onFailure = { Result.failure(it) }
                 )
             } else {
-                Result.failure(result.exceptionOrNull() ?: IllegalStateException("Skill 发布失败"))
+                Result.failure(
+                    result.exceptionOrNull()
+                        ?: IllegalStateException(context.getString(R.string.skill_publish_failed_title))
+                )
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to publish skill", e)
@@ -650,7 +664,9 @@ class SkillMarketViewModel(
     ): Result<Unit> {
         return try {
             if (!githubAuth.isLoggedIn()) {
-                return Result.failure(IllegalStateException("GitHub 登录后才能更新 Skill。"))
+                return Result.failure(
+                    IllegalStateException(context.getString(R.string.skill_update_login_required))
+                )
             }
 
             ensureSkillTitleAvailable(
@@ -686,13 +702,14 @@ class SkillMarketViewModel(
     ) {
         val trimmedTitle = title.trim()
         if (trimmedTitle.isBlank()) {
-            throw IllegalArgumentException("Skill 名称不能为空。")
+            throw IllegalArgumentException(context.getString(R.string.skill_publish_name_empty))
         }
 
         val issues =
             marketService.searchOpenIssuesByExactTitle(trimmedTitle).getOrElse { error ->
+                val searchError = error.message ?: context.getString(R.string.github_search_failed)
                 throw IllegalStateException(
-                    "检查 Skill 名称是否重名失败：${error.message ?: "GitHub 搜索失败"}"
+                    context.getString(R.string.skill_publish_check_name_conflict_failed, searchError)
                 )
             }
         val normalizedTitle = normalizePublishTitle(trimmedTitle)
@@ -702,7 +719,9 @@ class SkillMarketViewModel(
                     normalizePublishTitle(issue.title) == normalizedTitle
             }
         if (conflictingIssue != null) {
-            throw IllegalStateException("Skill 市场里已经有同名插件「$trimmedTitle」，请换一个名称。")
+            throw IllegalStateException(
+                context.getString(R.string.skill_publish_name_taken_message, trimmedTitle)
+            )
         }
     }
 

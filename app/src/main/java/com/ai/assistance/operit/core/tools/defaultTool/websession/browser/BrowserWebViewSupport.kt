@@ -1,12 +1,14 @@
 package com.ai.assistance.operit.core.tools.defaultTool.websession.browser
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -64,6 +66,7 @@ internal fun StandardBrowserSessionTools.resolveWebViewContext(fallbackContext: 
     }
 }
 
+@SuppressLint("ClickableViewAccessibility")
 internal fun StandardBrowserSessionTools.configureWebView(
     session: BrowserToolSession,
     userAgent: String
@@ -100,11 +103,36 @@ internal fun StandardBrowserSessionTools.configureWebView(
         isFocusable = true
         isFocusableInTouchMode = true
         isClickable = true
-        isLongClickable = true
+        isLongClickable = false
+        isHapticFeedbackEnabled = false
         contentDescription = context.getString(R.string.web_session_accessibility_web_content)
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                    view.isLongClickable = false
+                    view.isHapticFeedbackEnabled = false
+                    if (!view.hasFocus()) {
+                        view.requestFocus()
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            false
+        }
         addJavascriptInterface(BrowserWebDownloadBridge(this@configureWebView, session), "OperitWebDownloadBridge")
         addJavascriptInterface(BrowserAsyncBridge(), "OperitAsyncBridge")
+        addJavascriptInterface(BrowserTextSelectionBridge(), "OperitTextSelectionBridge")
         setDownloadListener(createDownloadListener(session))
+        setOnLongClickListener { true }
+        isLongClickable = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             isScreenReaderFocusable = true
         }
@@ -295,6 +323,7 @@ internal fun StandardBrowserSessionTools.configureWebView(
                 applyViewportOverride(session)
                 refreshNavigationStateFromWebView(view, session)
                 injectDownloadHelper(view)
+                injectTextSelectionHelper(view)
                 ioScope.launch {
                     historyStore.updateTitle(url, session.pageTitle)
                 }

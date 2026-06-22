@@ -147,6 +147,7 @@ class StandardWorkflowTools(private val context: Context) {
             }
 
             val workflow = Workflow(
+                id = UUID.randomUUID().toString(),
                 name = name,
                 description = description,
                 nodes = nodes,
@@ -320,7 +321,19 @@ class StandardWorkflowTools(private val context: Context) {
                 enabled = enabled
             )
 
-            val result = workflowRepository.updateWorkflow(updatedWorkflow)
+            val contentChanged =
+                existingWorkflow.name != updatedWorkflow.name ||
+                    existingWorkflow.description != updatedWorkflow.description ||
+                    existingWorkflow.nodes != updatedWorkflow.nodes ||
+                    existingWorkflow.connections != updatedWorkflow.connections
+            val enabledChanged = existingWorkflow.enabled != updatedWorkflow.enabled
+            val result = if (contentChanged) {
+                workflowRepository.updateWorkflow(updatedWorkflow)
+            } else if (enabledChanged) {
+                workflowRepository.setWorkflowEnabled(workflowId, enabled)
+            } else {
+                Result.success(existingWorkflow)
+            }
             
             if (result.isSuccess) {
                 val savedWorkflow = result.getOrNull()!!
@@ -395,7 +408,7 @@ class StandardWorkflowTools(private val context: Context) {
                 )
             }
 
-            val saveResult = workflowRepository.updateWorkflow(existingWorkflow.copy(enabled = enabled))
+            val saveResult = workflowRepository.setWorkflowEnabled(workflowId, enabled)
             if (saveResult.isSuccess) {
                 val savedWorkflow = saveResult.getOrNull()!!
                 ToolResult(
@@ -779,7 +792,19 @@ class StandardWorkflowTools(private val context: Context) {
                 enabled = enabled
             )
 
-            val result = workflowRepository.updateWorkflow(updatedWorkflow)
+            val contentChanged =
+                existingWorkflow.name != updatedWorkflow.name ||
+                    existingWorkflow.description != updatedWorkflow.description ||
+                    existingWorkflow.nodes != updatedWorkflow.nodes ||
+                    existingWorkflow.connections != updatedWorkflow.connections
+            val enabledChanged = existingWorkflow.enabled != updatedWorkflow.enabled
+            val result = if (contentChanged) {
+                workflowRepository.updateWorkflow(updatedWorkflow)
+            } else if (enabledChanged) {
+                workflowRepository.setWorkflowEnabled(workflowId, enabled)
+            } else {
+                Result.success(existingWorkflow)
+            }
             if (result.isSuccess) {
                 buildNodeDetailResult(result.getOrNull()!!)
             } else {

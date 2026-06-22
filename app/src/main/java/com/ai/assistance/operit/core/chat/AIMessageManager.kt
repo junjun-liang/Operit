@@ -25,6 +25,7 @@ import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.model.PromptFunctionType
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceAttachmentProcessor
+import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceChangeTracker
 import com.ai.assistance.operit.util.ImagePoolManager
 import com.ai.assistance.operit.util.MediaPoolManager
 import com.ai.assistance.operit.util.ChatUtils
@@ -105,9 +106,8 @@ object AIMessageManager {
      *
      * @param messageText 用户输入的原始文本。
      * @param attachments 附件列表。
-     * @param enableWorkspaceAttachment 是否启用工作区附着功能。
      * @param workspacePath 工作区路径。
-     * @param workspaceEnv 工作区环境。
+     * @param workspaceEnv 工作区环境标签。
      * @param replyToMessage 回复消息。
      * @param enableDirectImageProcessing 是否将图片附件转换为link标签（用于直接图片处理）。
      * @param enableDirectAudioProcessing 是否将音频附件转换为link标签（用于直接音频处理）。
@@ -115,21 +115,22 @@ object AIMessageManager {
      * @return 格式化后的完整消息字符串。
      */
     suspend fun buildUserMessageContent(
+        context: Context,
         messageText: String,
         proxySenderName: String? = null,
         attachments: List<AttachmentInfo>,
-        enableWorkspaceAttachment: Boolean = false,
         workspacePath: String? = null,
         workspaceEnv: String? = null,
         replyToMessage: ChatMessage? = null,
         enableDirectImageProcessing: Boolean = false,
         enableDirectAudioProcessing: Boolean = false,
         enableDirectVideoProcessing: Boolean = false,
-        chatId: String? = null
+        chatId: String? = null,
+        roleCardId: String? = null
     ): String {
         val totalStartTime = messageTimingNow()
         val promptInputStartTime = messageTimingNow()
-        val processedMessageText = InputProcessor.processUserInput(messageText, chatId)
+        val processedMessageText = InputProcessor.processUserInput(context, messageText, chatId, roleCardId)
         logMessageTiming(
             stage = "buildUserMessageContent.processUserInput",
             startTimeMs = promptInputStartTime,
@@ -163,28 +164,33 @@ object AIMessageManager {
             details = "hasReply=${replyToMessage != null}, length=${replyTag.length}"
         )
 
-        // 3. 根据开关决定是否生成工作区附着
+        // 2. 构建工作区标签
         val workspaceTagStartTime = messageTimingNow()
-        val workspaceTag = if (enableWorkspaceAttachment && !workspacePath.isNullOrBlank() && !processedMessageText.contains("<workspace_attachment>", ignoreCase = true)) {
-            try {
-                val workspaceContent = WorkspaceAttachmentProcessor.generateWorkspaceAttachment(
-                    context = context,
-                    workspacePath = workspacePath,
-                    workspaceEnv = workspaceEnv
-                )
-                "<workspace_attachment>$workspaceContent</workspace_attachment>"
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "生成工作区附着失败", e)
+        val normalizedWorkspacePath = workspacePath?.trim().orEmpty()
+        val workspaceTag =
+            if (normalizedWorkspacePath.isNotEmpty() &&
+                !processedMessageText.contains("<workspace_attachment", ignoreCase = true)
+            ) {
+                val workspaceChanges =
+                    WorkspaceChangeTracker.getInstance(context)
+                        .consumeChanges(chatId, normalizedWorkspacePath, workspaceEnv)
+                "<workspace_attachment>" +
+                    WorkspaceAttachmentProcessor.generateWorkspaceAttachment(
+                        context,
+                        workspaceEnv,
+                        workspaceChanges
+                    ) +
+                    "</workspace_attachment>"
+            } else {
                 ""
             }
-        } else ""
         logMessageTiming(
             stage = "buildUserMessageContent.workspaceTag",
             startTimeMs = workspaceTagStartTime,
-            details = "enabled=$enableWorkspaceAttachment, hasWorkspace=${!workspacePath.isNullOrBlank()}, length=${workspaceTag.length}"
+            details = "hasWorkspace=${normalizedWorkspacePath.isNotEmpty()}, length=${workspaceTag.length}"
         )
 
-        // 4. 构建附件标签
+        // 3. 构建附件标签
         val attachmentTagsStartTime = messageTimingNow()
         val attachmentTags = if (attachments.isNotEmpty()) {
             attachments.joinToString(" ") { attachment ->
@@ -192,7 +198,22 @@ object AIMessageManager {
                 if (enableDirectImageProcessing && attachment.mimeType.startsWith("image/", ignoreCase = true)) {
                     try {
                         val imageId = ImagePoolManager.addImage(attachment.filePath)
-                        MediaLinkBuilder.image(context, imageId)
+                        val attributes = buildString {
+                            append("id=\"${attachment.filePath}\" ")
+                            append("filename=\"${attachment.fileName}\" ")
+                            append("type=\"${attachment.mimeType}\"")
+                            if (attachment.fileSize > 0) {
+                                append(" size=\"${attachment.fileSize}\"")
+                            }
+                        }
+                        val attachedContent = buildString {
+                            append(context.getString(R.string.ai_message_image_attached_multimodal_notice))
+                            if (attachment.content.isNotBlank()) {
+                                append("\n")
+                                append(attachment.content)
+                            }
+                        }
+                        "${MediaLinkBuilder.image(context, imageId)} <attachment $attributes>$attachedContent</attachment>"
                     } catch (e: Exception) {
                         AppLogger.e(TAG, "添加图片到池失败: ${attachment.filePath}", e)
                         // 失败时回退到普通附件格式
@@ -264,7 +285,7 @@ object AIMessageManager {
             details = "attachments=${attachments.size}, length=${attachmentTags.length}, directImage=$enableDirectImageProcessing, directAudio=$enableDirectAudioProcessing, directVideo=$enableDirectVideoProcessing"
         )
 
-        // 5. 组合最终消息
+        // 4. 组合最终消息
         val finalMessageContent = listOf(proxySenderTag, processedMessageText, attachmentTags, workspaceTag, replyTag)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -404,6 +425,7 @@ object AIMessageManager {
                 AppLogger.d(TAG, "消息处理插件已接管消息处理")
                 val pluginStream = pluginExecution.stream.share(
                     scope = scope,
+                    replay = Int.MAX_VALUE,
                     onComplete = {
                         activeMessageProcessingControllerByChatId.remove(chatKey)
                         activeEnhancedAiServiceByChatId.remove(chatKey)
@@ -461,6 +483,7 @@ object AIMessageManager {
                 )
             ).shareRevisable(
                 scope = scope,
+                replay = Int.MAX_VALUE,
                 onComplete = {
                     activeMessageProcessingControllerByChatId.remove(chatKey)
                     activeEnhancedAiServiceByChatId.remove(chatKey)
@@ -632,7 +655,8 @@ object AIMessageManager {
         enhancedAiService: EnhancedAIService,
         messages: List<ChatMessage>,
         autoContinue: Boolean = false,
-        isGroupChat: Boolean = false
+        isGroupChat: Boolean = false,
+        summaryCustomRules: String? = null
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
@@ -771,10 +795,10 @@ object AIMessageManager {
                 val preview = condenseToolResultPreview(mr.value)
                 buildString {
                     if (name != null) {
-                        append("[结果: ")
+                        append(context.getString(R.string.ai_message_result_prefix))
                         append(name)
                         append(statusSuffix)
-                        append("]")
+                        append(context.getString(R.string.ai_message_result_suffix))
                     } else {
                         append(context.getString(R.string.ai_message_tool_result_omitted_short))
                     }
@@ -898,15 +922,15 @@ object AIMessageManager {
                         val resultPreview = condenseToolResultPreview(seg.raw)
                         buildString {
                             if (statusText.isBlank()) {
-                                append("[结果: ")
+                                append(context.getString(R.string.ai_message_result_prefix))
                                 append(name)
-                                append("]")
+                                append(context.getString(R.string.ai_message_result_suffix))
                             } else {
-                                append("[结果: ")
+                                append(context.getString(R.string.ai_message_result_prefix))
                                 append(name)
                                 append(" ")
                                 append(statusText)
-                                append("]")
+                                append(context.getString(R.string.ai_message_result_suffix))
                             }
                             if (resultPreview.isNotBlank()) {
                                 append(" ")
@@ -988,7 +1012,7 @@ object AIMessageManager {
 
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
-            val summary = enhancedAiService.generateSummary(conversationToSummarize, previousSummary)
+            val summary = enhancedAiService.generateSummary(conversationToSummarize, previousSummary, summaryCustomRules)
             AppLogger.d(TAG, "AI生成总结完成: ${summary.take(50)}...")
 
             if (summary.isBlank()) {
@@ -1043,7 +1067,7 @@ object AIMessageManager {
         messagesToSummarize: List<ChatMessage>,
         useEnglish: Boolean
     ): String {
-        val title = if (useEnglish) "[Package Warmup]" else "【工具包预热】"
+        val title = context.getString(R.string.ai_message_package_warmup_title)
         val topPackages = extractTopPackageUsages(messagesToSummarize, limit = 2)
 
         if (topPackages.isEmpty()) {
@@ -1051,7 +1075,7 @@ object AIMessageManager {
                 if (useEnglish) {
                     "No package-prefixed tool usage was detected in this summary window, so no package was preheated."
                 } else {
-                    "本次摘要范围内未检测到包工具调用，因此未进行工具包预热。"
+                    context.getString(R.string.ai_message_package_warmup_empty)
                 }
             return "$title\n$emptyMessage"
         }
@@ -1060,7 +1084,7 @@ object AIMessageManager {
             if (useEnglish) {
                 "The following high-frequency packages were automatically activated from the summarized tool usage, and their use_package results are attached for the next-turn warmup."
             } else {
-                "以下根据本次摘要范围内的工具使用频次，自动激活了最高频的工具包，并附上 use_package 的返回结果，供下一轮预热。"
+                context.getString(R.string.ai_message_package_warmup_intro)
             }
 
         val body = withContext(Dispatchers.IO) {
@@ -1075,21 +1099,31 @@ object AIMessageManager {
                                 if (useEnglish) {
                                     "use_package failed: ${throwable.message ?: "unknown error"}"
                                 } else {
-                                    "use_package 调用失败: ${throwable.message ?: "未知错误"}"
+                                    context.getString(
+                                        R.string.ai_message_use_package_failed,
+                                        throwable.message ?: context.getString(R.string.unknown_error)
+                                    )
                                 }
                             }
                             .ifBlank {
                                 if (useEnglish) {
                                     "use_package returned empty content."
                                 } else {
-                                    "use_package 返回为空。"
+                                    context.getString(R.string.ai_message_use_package_empty)
                                 }
                             }
 
                     if (useEnglish) {
                         appendLine("${index + 1}. Package ${stat.packageName} (${stat.count} hits)")
                     } else {
-                        appendLine("${index + 1}. 包 ${stat.packageName}（命中 ${stat.count} 次）")
+                        appendLine(
+                            context.getString(
+                                R.string.ai_message_package_warmup_item,
+                                index + 1,
+                                stat.packageName,
+                                stat.count
+                            )
+                        )
                     }
                     appendLine(indentBlock(resultText, "   "))
                     if (index != topPackages.lastIndex) {

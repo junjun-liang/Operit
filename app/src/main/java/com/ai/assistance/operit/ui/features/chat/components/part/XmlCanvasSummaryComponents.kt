@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtLeast
 import kotlin.math.max
 
+private const val CANVAS_SINGLE_LINE_TEXT_LIMIT = 160
+
 @Composable
 internal fun CanvasToolSummaryRow(
     toolName: String,
@@ -59,6 +61,7 @@ internal fun CanvasToolSummaryRow(
     val iconPainter = rememberVectorPainter(leadingIcon)
     val titleStyle = MaterialTheme.typography.labelMedium.copy(color = titleColor)
     val summaryStyle = MaterialTheme.typography.bodySmall.copy(color = summaryColor)
+    val measuredSummary = remember(summary) { summary.toCanvasSingleLineText() }
     val interactionSource = remember { MutableInteractionSource() }
     val clickableModifier =
         if (onClick != null) {
@@ -114,9 +117,9 @@ internal fun CanvasToolSummaryRow(
             (widthPx - iconSizePx.toInt() - gap1Px.toInt() - titleWidthPx - gap2Px.toInt())
                 .fastCoerceAtLeast(0)
         val summaryLayout =
-            remember(summary, summaryStyle, textMeasurer, summaryMaxWidth) {
+            remember(measuredSummary, summaryStyle, textMeasurer, summaryMaxWidth) {
                 textMeasurer.measure(
-                    text = AnnotatedString(summary),
+                    text = AnnotatedString(measuredSummary),
                     style = summaryStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -153,6 +156,15 @@ internal fun CanvasToolSummaryRow(
             val summaryY = textTopBase + (contentHeightPx - summaryLayout.size.height) / 2f
             drawText(summaryLayout, topLeft = Offset(summaryX, summaryY))
         }
+    }
+}
+
+private fun String.toCanvasSingleLineText(): String {
+    val normalized = replace('\r', ' ').replace('\n', ' ').trim()
+    return if (normalized.length <= CANVAS_SINGLE_LINE_TEXT_LIMIT) {
+        normalized
+    } else {
+        normalized.take(CANVAS_SINGLE_LINE_TEXT_LIMIT) + "..."
     }
 }
 

@@ -196,8 +196,8 @@ class CharacterCardManager private constructor(private val context: Context) {
         characterCardId: String,
         emojiSourcePrompt: ActivePrompt
     ) {
-        // 获取当前默认主题配置作为新角色卡的主题基础
-        userPreferencesManager.copyCurrentThemeToCharacterCard(characterCardId)
+        // 新建角色卡使用默认主题，不继承创建时的当前主题。
+        userPreferencesManager.deleteCharacterCardTheme(characterCardId)
         // 同时也复制当前Waifu模式配置
         waifuPreferences.copyCurrentWaifuSettingsToCharacterCard(characterCardId)
         // 同时复制创建前活跃目标的自定义表情配置

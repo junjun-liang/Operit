@@ -60,7 +60,8 @@ interface MessageVariantDao {
             cachedInputTokens,
             sentAt,
             outputDurationMs,
-            waitDurationMs
+            waitDurationMs,
+            completedAt
         )
         SELECT
             :targetChatId,
@@ -75,7 +76,8 @@ interface MessageVariantDao {
             cachedInputTokens,
             sentAt,
             outputDurationMs,
-            waitDurationMs
+            waitDurationMs,
+            completedAt
         FROM message_variants
         WHERE chatId = :sourceChatId
             AND (:upToTimestampInclusive IS NULL OR messageTimestamp <= :upToTimestampInclusive)

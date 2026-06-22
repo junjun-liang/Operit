@@ -12,6 +12,8 @@ data class ToolPkgMainRegistrationCapture(
     val messageProcessingPlugins: List<String>,
     val xmlRenderPlugins: List<String>,
     val inputMenuTogglePlugins: List<String>,
+    val chatInputHooks: List<String>,
+    val chatViewHooks: List<String>,
     val toolLifecycleHooks: List<String>,
     val promptInputHooks: List<String>,
     val promptHistoryHooks: List<String>,
@@ -33,6 +35,8 @@ private enum class RegistrationBucket {
     MESSAGE_PROCESSING,
     XML_RENDER,
     INPUT_MENU_TOGGLE,
+    CHAT_INPUT,
+    CHAT_VIEW,
     TOOL_LIFECYCLE,
     PROMPT_INPUT,
     PROMPT_HISTORY,
@@ -67,6 +71,12 @@ internal class JsToolPkgRegistrationSession {
     fun appendInputMenuTogglePlugin(specJson: String) =
         append(RegistrationBucket.INPUT_MENU_TOGGLE, specJson)
 
+    fun appendChatInputHook(specJson: String) =
+        append(RegistrationBucket.CHAT_INPUT, specJson)
+
+    fun appendChatViewHook(specJson: String) =
+        append(RegistrationBucket.CHAT_VIEW, specJson)
+
     fun appendToolLifecycleHook(specJson: String) =
         append(RegistrationBucket.TOOL_LIFECYCLE, specJson)
 
@@ -92,9 +102,9 @@ internal class JsToolPkgRegistrationSession {
         append(RegistrationBucket.AI_PROVIDER, specJson)
 
     fun finish(executionResult: Any?): ToolPkgMainRegistrationCapture {
-        if (executionResult is String && executionResult.trim().startsWith("Error:", ignoreCase = true)) {
-            val message = executionResult.substringAfter(':', executionResult).trim()
-            throw IllegalStateException(message.ifBlank { "toolpkg main registration failed" })
+        val errorMessage = extractJsExecutionErrorMessage(executionResult)
+        if (errorMessage != null) {
+            throw IllegalStateException(errorMessage)
         }
         synchronized(lock) {
             val current = capture.orEmpty()
@@ -108,6 +118,8 @@ internal class JsToolPkgRegistrationSession {
                 messageProcessingPlugins = read(RegistrationBucket.MESSAGE_PROCESSING),
                 xmlRenderPlugins = read(RegistrationBucket.XML_RENDER),
                 inputMenuTogglePlugins = read(RegistrationBucket.INPUT_MENU_TOGGLE),
+                chatInputHooks = read(RegistrationBucket.CHAT_INPUT),
+                chatViewHooks = read(RegistrationBucket.CHAT_VIEW),
                 toolLifecycleHooks = read(RegistrationBucket.TOOL_LIFECYCLE),
                 promptInputHooks = read(RegistrationBucket.PROMPT_INPUT),
                 promptHistoryHooks = read(RegistrationBucket.PROMPT_HISTORY),
@@ -151,7 +163,7 @@ internal fun buildToolPkgRegistrationBridgeScript(): String {
             var root = typeof globalThis !== 'undefined'
                 ? globalThis
                 : (typeof window !== 'undefined' ? window : this);
-            var inlineHookCounter = 0;
+            var moduleRefFunctionCounter = 0;
 
             function installGlobal(name, value) {
                 var key = String(name || '').trim();
@@ -205,11 +217,81 @@ internal fun buildToolPkgRegistrationBridgeScript(): String {
                 return '';
             }
 
-            function buildInlineFunctionName(definition) {
-                inlineHookCounter += 1;
+            function buildGeneratedFunctionName(definition) {
+                moduleRefFunctionCounter += 1;
                 var rawId = String((definition && definition.id) || 'hook');
                 var safeId = rawId.replace(/[^a-zA-Z0-9_$]/g, '_') || 'hook';
-                return '__operit_inline_hook_' + safeId + '_' + inlineHookCounter;
+                return '__operit_module_ref_hook_' + safeId + '_' + moduleRefFunctionCounter;
+            }
+
+            function activeModulePath() {
+                var exportsRef = getActiveExports();
+                if (!exportsRef || typeof exportsRef !== 'object') {
+                    return '';
+                }
+                return typeof exportsRef.__operit_toolpkg_module_path === 'string'
+                    ? exportsRef.__operit_toolpkg_module_path.trim().replace(/\\/g, '/')
+                    : '';
+            }
+
+            function dirname(path) {
+                var normalized = String(path || '').replace(/\\/g, '/');
+                var slash = normalized.lastIndexOf('/');
+                return slash >= 0 ? normalized.slice(0, slash) : '';
+            }
+
+            function relativeRequirePath(fromModulePath, targetModulePath) {
+                var fromDir = dirname(fromModulePath);
+                var target = String(targetModulePath || '').replace(/\\/g, '/');
+                if (!fromDir) {
+                    return './' + target;
+                }
+                var fromParts = fromDir.split('/').filter(Boolean);
+                var targetParts = target.split('/').filter(Boolean);
+                while (fromParts.length > 0 && targetParts.length > 0 && fromParts[0] === targetParts[0]) {
+                    fromParts.shift();
+                    targetParts.shift();
+                }
+                var up = fromParts.map(function() { return '..'; });
+                var parts = up.concat(targetParts);
+                var rel = parts.join('/');
+                return rel.startsWith('.') ? rel : './' + rel;
+            }
+
+            function buildModuleRefFunctionSource(requirePath, exportName) {
+                return 'function() {' +
+                    'var moduleRef = require(' + JSON.stringify(requirePath) + ');' +
+                    'var fn = moduleRef && moduleRef[' + JSON.stringify(exportName) + '];' +
+                    'if (typeof fn !== "function") {' +
+                        'throw new Error("ToolPkg registered function export not found: ' + exportName.replace(/"/g, '\\"') + '");' +
+                    '}' +
+                    'return fn.apply(null, arguments);' +
+                '}';
+            }
+
+            function resolveDurableFunctionRef(fn, definition, label) {
+                var exportedName = resolveExportedFunctionName(fn);
+                if (exportedName) {
+                    return {
+                        name: exportedName,
+                        source: ''
+                    };
+                }
+                var modulePath = typeof fn.__operit_toolpkg_module_path === 'string'
+                    ? fn.__operit_toolpkg_module_path.trim().replace(/\\/g, '/')
+                    : '';
+                var exportName = typeof fn.__operit_toolpkg_export_name === 'string'
+                    ? fn.__operit_toolpkg_export_name.trim()
+                    : '';
+                if (!modulePath || !exportName) {
+                    throw new Error(label + ' function must be exported from a toolpkg module');
+                }
+                var fromModulePath = activeModulePath();
+                var functionName = buildGeneratedFunctionName(definition);
+                return {
+                    name: functionName,
+                    source: buildModuleRefFunctionSource(relativeRequirePath(fromModulePath, modulePath), exportName)
+                };
             }
 
             function normalizeFunctionField(definition, fieldName, label) {
@@ -221,10 +303,10 @@ internal fun buildToolPkgRegistrationBridgeScript(): String {
                 if (typeof fn !== 'function') {
                     throw new Error(label + ' requires a function reference');
                 }
-                var exportedName = resolveExportedFunctionName(fn);
-                normalized[fieldName] = exportedName || buildInlineFunctionName(definition);
-                if (!exportedName) {
-                    normalized.function_source = String(fn);
+                var functionRef = resolveDurableFunctionRef(fn, definition, label);
+                normalized[fieldName] = functionRef.name;
+                if (functionRef.source) {
+                    normalized.function_source = functionRef.source;
                 }
                 return normalized;
             }
@@ -241,13 +323,13 @@ internal fun buildToolPkgRegistrationBridgeScript(): String {
                 if (typeof fn !== 'function') {
                     throw new Error(label + '.' + fieldName + '.function must be a function reference');
                 }
-                var exportedName = resolveExportedFunctionName(fn);
-                var normalizedField = copyObject(fieldValue, 'function');
-                normalizedField.function = exportedName || buildInlineFunctionName({
+                var functionRef = resolveDurableFunctionRef(fn, {
                     id: String((definition && definition.id) || 'provider') + '_' + fieldName
-                });
-                if (!exportedName) {
-                    normalizedField.function_source = String(fn);
+                }, label + '.' + fieldName);
+                var normalizedField = copyObject(fieldValue, 'function');
+                normalizedField.function = functionRef.name;
+                if (functionRef.source) {
+                    normalizedField.function_source = functionRef.source;
                 }
                 return normalizedField;
             }
@@ -411,6 +493,8 @@ internal fun buildToolPkgRegistrationBridgeScript(): String {
                 ['registerMessageProcessingPlugin', 'registerToolPkgMessageProcessingPlugin'],
                 ['registerXmlRenderPlugin', 'registerToolPkgXmlRenderPlugin'],
                 ['registerInputMenuTogglePlugin', 'registerToolPkgInputMenuTogglePlugin'],
+                ['registerChatInputHook', 'registerToolPkgChatInputHook'],
+                ['registerChatViewHook', 'registerToolPkgChatViewHook'],
                 ['registerToolLifecycleHook', 'registerToolPkgToolLifecycleHook'],
                 ['registerPromptInputHook', 'registerToolPkgPromptInputHook'],
                 ['registerPromptHistoryHook', 'registerToolPkgPromptHistoryHook'],

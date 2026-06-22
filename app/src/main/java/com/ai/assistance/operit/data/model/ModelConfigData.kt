@@ -19,6 +19,7 @@ enum class ApiProviderType {
         ZHIPU, // 智谱AI (ChatGLM系列)
         BAICHUAN, // 百川大模型
         MOONSHOT, // 月之暗面大模型
+        MIMO, // Xiaomi MiMo
         DEEPSEEK, // Deepseek大模型
         MISTRAL, // Mistral AI (Codestral等)
         SILICONFLOW, // 硅基流动
@@ -118,6 +119,8 @@ data class ModelConfigData(
                 ModelConfigDefaults.DEFAULT_ENABLE_SUMMARY_BY_MESSAGE_COUNT,
         val summaryMessageCountThreshold: Int =
                 ModelConfigDefaults.DEFAULT_SUMMARY_MESSAGE_COUNT_THRESHOLD,
+        // 自定义总结规则
+        val summaryCustomRules: String = "",
 
         // MNN特定配置
         // 注意：MNN模型路径会根据modelName自动构建，不需要单独存储
@@ -144,6 +147,9 @@ data class ModelConfigData(
 
         // Gemini特定配置
         val enableGoogleSearch: Boolean = false, // 是否启用Google Search Grounding (仅Gemini支持)
+
+        // Claude特定配置
+        val enableClaude1hPromptCache: Boolean = false, // 是否启用1小时提示缓存TTL (仅Claude支持)
 
         // Tool Call配置
         val enableToolCall: Boolean = false, // 是否启用Tool Call接口调用工具（使用模型原生工具调用而非XML格式）

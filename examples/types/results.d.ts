@@ -341,6 +341,118 @@ export interface AppUsageTimeResultData {
 }
 
 /**
+ * Bluetooth adapter state
+ */
+export interface BluetoothStateData {
+    supported: boolean;
+    enabled: boolean;
+    state: 'unsupported' | 'off' | 'turning_on' | 'on' | 'turning_off' | 'unknown';
+    toString(): string;
+}
+
+/**
+ * Bluetooth bonded device entry
+ */
+export interface BluetoothDeviceData {
+    name?: string;
+    address: string;
+    type: 'classic' | 'le' | 'dual' | 'unknown';
+    bondState: 'none' | 'bonding' | 'bonded' | 'unknown';
+}
+
+/**
+ * Bluetooth bonded devices result
+ */
+export interface BluetoothBondedDevicesData {
+    devices: BluetoothDeviceData[];
+    toString(): string;
+}
+
+/**
+ * Bluetooth scanned device entry
+ */
+export interface BluetoothScannedDeviceData extends BluetoothDeviceData {
+    source: 'classic' | 'ble';
+    rssi?: number;
+}
+
+/**
+ * Bluetooth scan result
+ */
+export interface BluetoothScanResultData {
+    devices: BluetoothScannedDeviceData[];
+    durationMs: number;
+    includesBle: boolean;
+    toString(): string;
+}
+
+/**
+ * Bluetooth session result
+ */
+export interface BluetoothSessionData {
+    sessionId: string;
+    address: string;
+    mode: 'classic' | 'classic_listener' | 'ble';
+    toString(): string;
+}
+
+/**
+ * Bluetooth write result
+ */
+export interface BluetoothTransferData {
+    sessionId: string;
+    bytesWritten: number;
+    toString(): string;
+}
+
+/**
+ * Bluetooth read result
+ */
+export interface BluetoothReadData {
+    sessionId: string;
+    bytesRead: number;
+    text?: string;
+    dataBase64?: string;
+    toString(): string;
+}
+
+/**
+ * BLE services result
+ */
+export interface BluetoothBleServicesData {
+    sessionId: string;
+    services: BluetoothBleServiceData[];
+    toString(): string;
+}
+
+export interface BluetoothBleServiceData {
+    uuid: string;
+    characteristics: BluetoothBleCharacteristicData[];
+}
+
+export interface BluetoothBleCharacteristicData {
+    uuid: string;
+    properties: Array<'read' | 'write' | 'write_no_response' | 'notify' | 'indicate'>;
+}
+
+/**
+ * BLE notification list result
+ */
+export interface BluetoothBleNotificationData {
+    sessionId: string;
+    notifications: BluetoothBleNotificationEntry[];
+    toString(): string;
+}
+
+export interface BluetoothBleNotificationEntry {
+    characteristicUuid: string;
+    bytesRead: number;
+    text?: string;
+    dataBase64?: string;
+    timestamp: number;
+}
+
+/**
  * Notification data structure
  */
 export interface NotificationData {
@@ -516,7 +628,7 @@ export interface TerminalCommandResultData {
     /** ID of the terminal session used for execution */
     sessionId: string;
 
-    /** Whether this execution ended due to timeout */
+    /** Whether this execution ended due to timeout. Timeout still resolves normally. */
     timedOut?: boolean;
 
     /** Returns a formatted string representation of the terminal execution result */
@@ -565,10 +677,46 @@ export interface HiddenTerminalCommandResultData {
     /** Hidden executor key used for execution */
     executorKey: string;
 
-    /** Whether this execution ended due to timeout */
+    /** Whether this execution ended due to timeout. Timeout still resolves normally. */
     timedOut?: boolean;
 
     /** Returns a formatted string representation of the hidden terminal execution result */
+    toString(): string;
+}
+
+/**
+ * Music playback result data
+ */
+export type MusicPlaybackState = 'idle' | 'preparing' | 'playing' | 'paused' | 'ended' | 'stopped' | 'error';
+
+export interface MusicPlaybackResultData {
+    /** Playback state */
+    state: MusicPlaybackState;
+    /** Current audio source */
+    source?: string | null;
+    /** Current audio source type */
+    sourceType?: string | null;
+    /** Display title */
+    title?: string | null;
+    /** Display artist */
+    artist?: string | null;
+    /** Duration in milliseconds, when known */
+    durationMs?: number | null;
+    /** Current playback position in milliseconds */
+    positionMs: number;
+    /** Buffered playback position in milliseconds */
+    bufferedPositionMs: number;
+    /** Playback volume from 0 to 1 */
+    volume: number;
+    /** Whether current track loops */
+    loop: boolean;
+    /** Zero-based queue index when playing a queue */
+    queueIndex?: number | null;
+    /** Queue size when playing a queue */
+    queueSize?: number | null;
+    /** Operation message */
+    message: string;
+    /** Returns a formatted string representation of the music playback result */
     toString(): string;
 }
 
@@ -1259,6 +1407,7 @@ export interface ModelConfigResultItem {
     enableDirectAudioProcessing: boolean;
     enableDirectVideoProcessing: boolean;
     enableGoogleSearch: boolean;
+    enableClaude1hPromptCache: boolean;
     enableToolCall: boolean;
     requestLimitPerMinute: number;
     maxConcurrentRequests: number;

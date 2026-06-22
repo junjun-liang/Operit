@@ -326,6 +326,44 @@ data class HiddenTerminalCommandResultData(
     }
 }
 
+/** 音乐播放结果数据 */
+@Serializable
+data class MusicPlaybackResultData(
+        val state: String,
+        val source: String? = null,
+        val sourceType: String? = null,
+        val title: String? = null,
+        val artist: String? = null,
+        val durationMs: Long? = null,
+        val positionMs: Long = 0L,
+        val bufferedPositionMs: Long = 0L,
+        val volume: Float = 1f,
+        val loop: Boolean = false,
+        val queueIndex: Int? = null,
+        val queueSize: Int? = null,
+        val message: String = ""
+) : ToolResultData() {
+    override fun toString(): String {
+        val sb = StringBuilder()
+        sb.appendLine("Music Playback Result:")
+        sb.appendLine("State: $state")
+        if (!title.isNullOrBlank()) sb.appendLine("Title: $title")
+        if (!artist.isNullOrBlank()) sb.appendLine("Artist: $artist")
+        if (!source.isNullOrBlank()) sb.appendLine("Source: $source")
+        if (!sourceType.isNullOrBlank()) sb.appendLine("Source Type: $sourceType")
+        durationMs?.let { sb.appendLine("Duration: ${it}ms") }
+        sb.appendLine("Position: ${positionMs}ms")
+        sb.appendLine("Buffered Position: ${bufferedPositionMs}ms")
+        sb.appendLine("Volume: $volume")
+        sb.appendLine("Loop: $loop")
+        if (queueIndex != null && queueSize != null) {
+            sb.appendLine("Queue: ${queueIndex + 1}/$queueSize")
+        }
+        if (message.isNotBlank()) sb.appendLine("Message: $message")
+        return sb.toString()
+    }
+}
+
 /** 计算结果结构化数据 */
 @Serializable
 data class CalculationResultData(
@@ -712,6 +750,155 @@ data class AppUsageTimeResultData(
         return parts.joinToString(" ")
     }
 }
+
+/** Bluetooth adapter state. */
+@Serializable
+data class BluetoothStateData(
+        val supported: Boolean,
+        val enabled: Boolean,
+        val state: String
+) : ToolResultData() {
+    override fun toString(): String {
+        if (!supported) {
+            return "Bluetooth is not supported on this device"
+        }
+        return "Bluetooth state: $state"
+    }
+}
+
+/** Bluetooth bonded device list. */
+@Serializable
+data class BluetoothBondedDevicesData(
+        val devices: List<BluetoothDeviceData>
+) : ToolResultData() {
+    override fun toString(): String {
+        if (devices.isEmpty()) {
+            return "No bonded Bluetooth devices"
+        }
+        return "Bonded Bluetooth devices:\n" +
+                devices.joinToString("\n") { device ->
+                    "- ${device.name ?: "Unnamed"} (${device.address}) ${device.type}"
+                }
+    }
+}
+
+@Serializable
+data class BluetoothDeviceData(
+        val name: String?,
+        val address: String,
+        val type: String,
+        val bondState: String
+)
+
+/** Bluetooth scan result. */
+@Serializable
+data class BluetoothScanResultData(
+        val devices: List<BluetoothScannedDeviceData>,
+        val durationMs: Long,
+        val includesBle: Boolean
+) : ToolResultData() {
+    override fun toString(): String {
+        if (devices.isEmpty()) {
+            return "No Bluetooth devices found"
+        }
+        return "Bluetooth devices:\n" +
+                devices.joinToString("\n") { device ->
+                    "- ${device.name ?: "Unnamed"} (${device.address}) ${device.source}"
+                }
+    }
+}
+
+@Serializable
+data class BluetoothScannedDeviceData(
+        val name: String?,
+        val address: String,
+        val type: String,
+        val bondState: String,
+        val source: String,
+        val rssi: Int? = null
+)
+
+/** Bluetooth connection/session result. */
+@Serializable
+data class BluetoothSessionData(
+        val sessionId: String,
+        val address: String,
+        val mode: String
+) : ToolResultData() {
+    override fun toString(): String = "Bluetooth $mode session $sessionId connected to $address"
+}
+
+/** Bluetooth write result. */
+@Serializable
+data class BluetoothTransferData(
+        val sessionId: String,
+        val bytesWritten: Int
+) : ToolResultData() {
+    override fun toString(): String = "Wrote $bytesWritten bytes to Bluetooth session $sessionId"
+}
+
+/** Bluetooth read result. */
+@Serializable
+data class BluetoothReadData(
+        val sessionId: String,
+        val bytesRead: Int,
+        val text: String? = null,
+        val dataBase64: String? = null
+) : ToolResultData() {
+    override fun toString(): String {
+        return text ?: "Read $bytesRead bytes from Bluetooth session $sessionId"
+    }
+}
+
+@Serializable
+data class BluetoothBleServicesData(
+        val sessionId: String,
+        val services: List<BluetoothBleServiceData>
+) : ToolResultData() {
+    override fun toString(): String {
+        if (services.isEmpty()) {
+            return "No BLE services discovered for session $sessionId"
+        }
+        return "BLE services for $sessionId:\n" +
+                services.joinToString("\n") { service ->
+                    "- ${service.uuid}: ${service.characteristics.joinToString(", ") { it.uuid }}"
+                }
+    }
+}
+
+@Serializable
+data class BluetoothBleServiceData(
+        val uuid: String,
+        val characteristics: List<BluetoothBleCharacteristicData>
+)
+
+@Serializable
+data class BluetoothBleCharacteristicData(
+        val uuid: String,
+        val properties: List<String>
+)
+
+@Serializable
+data class BluetoothBleNotificationData(
+        val sessionId: String,
+        val notifications: List<BluetoothBleNotificationEntry>
+) : ToolResultData() {
+    override fun toString(): String {
+        if (notifications.isEmpty()) {
+            return "No BLE notifications for session $sessionId"
+        }
+        return notifications.joinToString("\n") { it.text ?: it.dataBase64.orEmpty() }
+    }
+}
+
+@Serializable
+data class BluetoothBleNotificationEntry(
+        val characteristicUuid: String,
+        val bytesRead: Int,
+        val text: String? = null,
+        val dataBase64: String? = null,
+        val timestamp: Long = System.currentTimeMillis()
+)
 
 /** Represents UI node structure for hierarchical display */
 @Serializable
@@ -2111,6 +2298,14 @@ data class SpeechTtsHttpConfigResultItem(
     val responsePipeline: List<HttpTtsResponsePipelineStep>
 )
 
+/** 语音服务 TTS VITS/Piper 包配置条目 */
+@Serializable
+data class SpeechTtsVitsPackageConfigResultItem(
+    val packagePath: String,
+    val speakerId: String,
+    val options: Map<String, String>
+)
+
 /** 语音服务 STT HTTP 配置条目 */
 @Serializable
 data class SpeechSttHttpConfigResultItem(
@@ -2125,6 +2320,7 @@ data class SpeechSttHttpConfigResultItem(
 data class SpeechServicesConfigResultData(
     val ttsServiceType: String,
     val ttsHttpConfig: SpeechTtsHttpConfigResultItem,
+    val ttsVitsPackageConfig: SpeechTtsVitsPackageConfigResultItem,
     val ttsCleanerRegexs: List<String>,
     val ttsSpeechRate: Float,
     val ttsPitch: Float,
@@ -2225,6 +2421,7 @@ data class ModelConfigResultItem(
     val enableDirectAudioProcessing: Boolean,
     val enableDirectVideoProcessing: Boolean,
     val enableGoogleSearch: Boolean,
+    val enableClaude1hPromptCache: Boolean,
     val enableToolCall: Boolean,
     val requestLimitPerMinute: Int,
     val maxConcurrentRequests: Int,

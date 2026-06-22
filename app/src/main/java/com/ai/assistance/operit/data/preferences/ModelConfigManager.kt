@@ -354,6 +354,7 @@ class ModelConfigManager(private val context: Context) {
             enableDirectAudioProcessing: Boolean,
             enableDirectVideoProcessing: Boolean,
             enableGoogleSearch: Boolean,
+            enableClaude1hPromptCache: Boolean,
             enableToolCall: Boolean
     ): ModelConfigData {
         return updateConfigInternal(configId) {
@@ -372,6 +373,7 @@ class ModelConfigManager(private val context: Context) {
                     enableDirectAudioProcessing = enableDirectAudioProcessing,
                     enableDirectVideoProcessing = enableDirectVideoProcessing,
                     enableGoogleSearch = enableGoogleSearch,
+                    enableClaude1hPromptCache = enableClaude1hPromptCache,
                     enableToolCall = enableToolCall
             )
         }
@@ -504,6 +506,12 @@ class ModelConfigManager(private val context: Context) {
         return updateConfigInternal(configId) { it.copy(enableGoogleSearch = enableGoogleSearch) }
     }
 
+    suspend fun updateClaude1hPromptCache(configId: String, enableClaude1hPromptCache: Boolean): ModelConfigData {
+        return updateConfigInternal(configId) {
+            it.copy(enableClaude1hPromptCache = enableClaude1hPromptCache)
+        }
+    }
+
     // 更新 Tool Call 配置
     suspend fun updateToolCall(configId: String, enableToolCall: Boolean): ModelConfigData {
         return updateConfigInternal(configId) {
@@ -531,14 +539,16 @@ class ModelConfigManager(private val context: Context) {
             enableSummary: Boolean,
             summaryTokenThreshold: Float,
             enableSummaryByMessageCount: Boolean,
-            summaryMessageCountThreshold: Int
+            summaryMessageCountThreshold: Int,
+            summaryCustomRules: String = ""
     ): ModelConfigData {
         return updateConfigInternal(configId) {
             it.copy(
                     enableSummary = enableSummary,
                     summaryTokenThreshold = summaryTokenThreshold,
                     enableSummaryByMessageCount = enableSummaryByMessageCount,
-                    summaryMessageCountThreshold = summaryMessageCountThreshold
+                    summaryMessageCountThreshold = summaryMessageCountThreshold,
+                    summaryCustomRules = summaryCustomRules
             )
         }
     }

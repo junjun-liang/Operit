@@ -20,7 +20,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,6 +43,7 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.ai.assistance.operit.core.tools.javascript.JsEngine
 import com.ai.assistance.operit.core.tools.javascript.JsJavaBridgeDelegates
+import com.ai.assistance.operit.core.tools.javascript.extractJsExecutionErrorMessage
 import com.ai.assistance.operit.core.tools.packTool.ToolPkgComposeDslNode
 import com.ai.assistance.operit.core.tools.packTool.ToolPkgComposeDslParser
 import com.ai.assistance.operit.ui.features.token.webview.WebViewConfig
@@ -97,7 +100,7 @@ internal data class ComposeDslWebViewStateSnapshot(
 
 internal data class ComposeDslWebViewBlockingActionResult(
     val actionResult: Any?,
-    val error: String?
+    val message: String?
 )
 
 private data class ComposeDslWebViewNavigationDecision(
@@ -169,7 +172,7 @@ internal class ComposeDslWebViewHostContext(
         if (normalizedActionId.isBlank()) {
             return ComposeDslWebViewBlockingActionResult(
                 actionResult = null,
-                error = "compose action id is required"
+                message = "compose action id is required"
             )
         }
         return try {
@@ -185,7 +188,7 @@ internal class ComposeDslWebViewHostContext(
             applyRenderResult("webview_action_final", rawResult)
             ComposeDslWebViewBlockingActionResult(
                 actionResult = parseComposeDslActionResult(rawResult),
-                error = extractComposeDslActionError(rawResult)
+                message = extractComposeDslActionError(rawResult)
             )
         } catch (error: Throwable) {
             val message = error.message?.trim().orEmpty().ifBlank { "compose action dispatch failed" }
@@ -196,7 +199,7 @@ internal class ComposeDslWebViewHostContext(
             )
             ComposeDslWebViewBlockingActionResult(
                 actionResult = null,
-                error = message
+                message = message
             )
         }
     }
@@ -715,7 +718,7 @@ private fun buildComposeDslBridgeSuccess(data: Any?): String =
 private fun buildComposeDslBridgeError(message: String): String =
     JSONObject()
         .put("success", false)
-        .put("error", message)
+        .put("message", message)
         .toString()
 
 private fun parseComposeDslActionResult(rawResult: Any?): Any? {
@@ -727,11 +730,7 @@ private fun parseComposeDslActionResult(rawResult: Any?): Any? {
 }
 
 private fun extractComposeDslActionError(rawResult: Any?): String? {
-    return rawResult?.toString()
-        ?.takeIf { text -> text.startsWith("Error:", ignoreCase = true) }
-        ?.removePrefix("Error:")
-        ?.trim()
-        ?.ifBlank { "compose action dispatch failed" }
+    return extractJsExecutionErrorMessage(rawResult)
 }
 
 private fun toStringMap(value: Any?): Map<String, String> {
@@ -792,7 +791,7 @@ private fun buildComposeDslWebViewJavascriptInterfaceRuntimeScript(): String {
             function unwrapResult(rawValue, label) {
                 var parsed = parseValue(rawValue);
                 if (parsed && typeof parsed === 'object' && parsed.success === false) {
-                    throw new Error(String(parsed.error || label || 'compose webview javascript interface call failed'));
+                    throw new Error(String(parsed.message || ''));
                 }
                 if (parsed && typeof parsed === 'object' && Object.prototype.hasOwnProperty.call(parsed, 'data')) {
                     return parsed.data;
@@ -1285,13 +1284,13 @@ private class ComposeDslWebViewPageBridge(
             hostContextProvider()
                 ?: return ComposeDslWebViewBlockingActionResult(
                     actionResult = null,
-                    error = "compose_dsl webview host context is unavailable"
+                    message = "compose_dsl webview host context is unavailable"
                 )
         val controllerKey = controllerKeyProvider()?.trim().orEmpty()
         if (controllerKey.isBlank()) {
             return ComposeDslWebViewBlockingActionResult(
                 actionResult = null,
-                error = "compose_dsl webview controller is unavailable"
+                message = "compose_dsl webview controller is unavailable"
             )
         }
         val normalizedInterfaceName = interfaceName.trim()
@@ -1299,14 +1298,14 @@ private class ComposeDslWebViewPageBridge(
         if (normalizedInterfaceName.isBlank() || normalizedMethodName.isBlank()) {
             return ComposeDslWebViewBlockingActionResult(
                 actionResult = null,
-                error = "webview javascript interface name and method are required"
+                message = "webview javascript interface name and method are required"
             )
         }
         val args =
             parseComposeDslJsonArray(argsJson)
                 ?: return ComposeDslWebViewBlockingActionResult(
                     actionResult = null,
-                    error = "webview javascript interface arguments must be a JSON array"
+                    message = "webview javascript interface arguments must be a JSON array"
                 )
         val actionId =
             ComposeDslWebViewHostRegistry.findJavascriptInterfaceActionId(
@@ -1317,7 +1316,7 @@ private class ComposeDslWebViewPageBridge(
             )
                 ?: return ComposeDslWebViewBlockingActionResult(
                     actionResult = null,
-                    error =
+                    message =
                         "javascript interface method is unavailable: $normalizedInterfaceName.$normalizedMethodName"
                 )
         return hostContext.executeActionBlocking(actionId, args)
@@ -1354,10 +1353,10 @@ private class ComposeDslWebViewPageBridge(
                         argsJson = argsJson
                     )
                 }
-            if (result.error.isNullOrBlank()) {
+            if (result.message.isNullOrBlank()) {
                 buildComposeDslBridgeSuccess(result.actionResult)
             } else {
-                buildComposeDslBridgeError(result.error)
+                buildComposeDslBridgeError(result.message)
             }
         } catch (error: TimeoutException) {
             AppLogger.e(TAG, "compose_dsl webview javascript interface invocation timed out")
@@ -1585,25 +1584,28 @@ internal fun renderWebViewNode(
     }
 
     var pendingFileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    val fileChooserLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val callback = pendingFileChooserCallback
-            pendingFileChooserCallback = null
-            if (callback == null) {
-                return@rememberLauncherForActivityResult
-            }
-            val uris =
-                WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
-                    ?: run {
-                        val intent = result.data
-                        val directData = intent?.data?.let { arrayOf(it) }
-                        val clipData =
-                            intent?.clipData?.let { clip ->
-                                Array(clip.itemCount) { index -> clip.getItemAt(index).uri }
-                            }
-                        directData ?: clipData
+    val activityResultRegistryOwner = LocalActivityResultRegistryOwner.current
+    val fileChooserLauncher: ActivityResultLauncher<Intent>? =
+        if (activityResultRegistryOwner != null) {
+            rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                val callback = pendingFileChooserCallback
+                pendingFileChooserCallback = null
+                if (callback == null) {
+                    return@rememberLauncherForActivityResult
+                }
+                val parsedUris =
+                    WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+                val intent = result.data
+                val directData = intent?.data?.let { arrayOf(it) }
+                val clipData =
+                    intent?.clipData?.let { clip ->
+                        Array(clip.itemCount) { index -> clip.getItemAt(index).uri }
                     }
-            callback.onReceiveValue(uris)
+                val uris = parsedUris ?: directData ?: clipData
+                callback.onReceiveValue(uris)
+            }
+        } else {
+            null
         }
     val pageBridge =
         remember(webViewScopeKey) {
@@ -1688,10 +1690,10 @@ internal fun renderWebViewNode(
                                 )
                                 return false
                             }
-                        if (!result.error.isNullOrBlank()) {
+                        if (!result.message.isNullOrBlank()) {
                             AppLogger.e(
                                 TAG,
-                                "compose_dsl webview navigation interceptor returned error: url=$requestUrl, error=${result.error}"
+                                "compose_dsl webview navigation interceptor returned error: url=$requestUrl, error=${result.message}"
                             )
                             return false
                         }
@@ -1778,10 +1780,10 @@ internal fun renderWebViewNode(
                                 )
                                 return super.shouldInterceptRequest(view, actualRequest)
                             }
-                        if (!result.error.isNullOrBlank()) {
+                        if (!result.message.isNullOrBlank()) {
                             AppLogger.e(
                                 TAG,
-                                "compose_dsl webview resource interceptor returned error: url=$requestUrl, error=${result.error}"
+                                "compose_dsl webview resource interceptor returned error: url=$requestUrl, error=${result.message}"
                             )
                             return super.shouldInterceptRequest(view, actualRequest)
                         }
@@ -2071,6 +2073,11 @@ internal fun renderWebViewNode(
                         if (filePathCallback == null) {
                             return false
                         }
+                        val launcher = fileChooserLauncher
+                        if (launcher == null) {
+                            filePathCallback.onReceiveValue(null)
+                            return false
+                        }
                         pendingFileChooserCallback?.onReceiveValue(null)
                         pendingFileChooserCallback = filePathCallback
                         return try {
@@ -2083,9 +2090,10 @@ internal fun renderWebViewNode(
                             if (fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
                                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                             }
-                            fileChooserLauncher.launch(intent)
+                            launcher.launch(intent)
                             true
-                        } catch (_: Throwable) {
+                        } catch (error: Throwable) {
+                            AppLogger.e(TAG, "compose_dsl webview failed to open file chooser", error)
                             pendingFileChooserCallback?.onReceiveValue(null)
                             pendingFileChooserCallback = null
                             false

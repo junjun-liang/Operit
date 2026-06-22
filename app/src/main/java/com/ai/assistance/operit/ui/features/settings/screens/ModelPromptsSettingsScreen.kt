@@ -1494,6 +1494,7 @@ fun ModelPromptsSettingsScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(max = 320.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -1807,6 +1808,7 @@ fun ModelPromptsSettingsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 360.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -3202,6 +3204,7 @@ fun TagDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 360.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {

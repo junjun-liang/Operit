@@ -9,7 +9,7 @@ import com.ai.assistance.operit.core.tools.climode.ToolExposureMode
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.skill.SkillRepository
-import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceAttachmentProcessor
+import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceRuleFileReader
 import com.ai.assistance.operit.util.LocaleUtils
 
 object SystemPromptConfig {
@@ -79,6 +79,7 @@ PACKAGE SYSTEM
   - 将目标工具参数放入 params（JSON对象）"""
 
     private fun getAvailableToolsEn(
+        chatId: String?,
         hasImageRecognition: Boolean,
         chatModelHasDirectImage: Boolean,
         hasAudioRecognition: Boolean,
@@ -87,9 +88,11 @@ PACKAGE SYSTEM
         chatModelHasDirectVideo: Boolean,
         safBookmarkNames: List<String>,
         toolVisibility: Map<String, Boolean>,
+        hookMetadata: Map<String, Any?> = emptyMap(),
         dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
     ): String {
         return SystemToolPrompts.generateToolsPromptEn(
+            chatId = chatId,
             hasBackendImageRecognition = hasImageRecognition,
             includeMemoryTools = false,
             chatModelHasDirectImage = chatModelHasDirectImage,
@@ -99,6 +102,7 @@ PACKAGE SYSTEM
             chatModelHasDirectVideo = chatModelHasDirectVideo,
             safBookmarkNames = safBookmarkNames,
             toolVisibility = toolVisibility,
+            hookMetadata = hookMetadata,
             dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
         )
     }
@@ -108,6 +112,7 @@ PACKAGE SYSTEM
     }
 
     private fun getAvailableToolsCn(
+        chatId: String?,
         hasImageRecognition: Boolean,
         chatModelHasDirectImage: Boolean,
         hasAudioRecognition: Boolean,
@@ -116,9 +121,11 @@ PACKAGE SYSTEM
         chatModelHasDirectVideo: Boolean,
         safBookmarkNames: List<String>,
         toolVisibility: Map<String, Boolean>,
+        hookMetadata: Map<String, Any?> = emptyMap(),
         dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
     ): String {
         return SystemToolPrompts.generateToolsPromptCn(
+            chatId = chatId,
             hasBackendImageRecognition = hasImageRecognition,
             includeMemoryTools = false,
             chatModelHasDirectImage = chatModelHasDirectImage,
@@ -128,6 +135,7 @@ PACKAGE SYSTEM
             chatModelHasDirectVideo = chatModelHasDirectVideo,
             safBookmarkNames = safBookmarkNames,
             toolVisibility = toolVisibility,
+            hookMetadata = hookMetadata,
             dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
         )
     }
@@ -237,6 +245,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
   suspend fun getSystemPrompt(
           context: Context,
           packageManager: PackageManager,
+          chatId: String? = null,
           workspacePath: String? = null,
           workspaceEnv: String? = null,
           safBookmarkNames: List<String> = emptyList(),
@@ -255,6 +264,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
           allowedPackageNames: Set<String>? = null,
           allowedSkillNames: Set<String>? = null,
           allowedMcpServerNames: Set<String>? = null,
+          hookMetadata: Map<String, Any?> = emptyMap(),
           dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
   ): String {
     val enabledPackages = packageManager.getEnabledPackageNames()
@@ -337,7 +347,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
         if (useEnglish) SYSTEM_PROMPT_TEMPLATE else SYSTEM_PROMPT_TEMPLATE_CN
     }
     val workspaceRuleFile =
-        WorkspaceAttachmentProcessor.readWorkspaceRootRuleFile(
+        WorkspaceRuleFileReader.readWorkspaceRootRuleFile(
             context = context,
             workspacePath = workspacePath,
             workspaceEnv = workspaceEnv
@@ -363,6 +373,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
     val availableToolsEn = if (useToolCallApi || toolExposureMode == ToolExposureMode.CLI) "" else (
         getMemoryToolsEn(toolVisibility) +
             getAvailableToolsEn(
+                chatId = chatId,
                 hasImageRecognition = hasImageRecognition,
                 chatModelHasDirectImage = chatModelHasDirectImage,
                 hasAudioRecognition = hasAudioRecognition,
@@ -371,12 +382,14 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
                 chatModelHasDirectVideo = chatModelHasDirectVideo,
                 safBookmarkNames = safBookmarkNames,
                 toolVisibility = toolVisibility,
+                hookMetadata = hookMetadata,
                 dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
             )
     )
     val availableToolsCn = if (useToolCallApi || toolExposureMode == ToolExposureMode.CLI) "" else (
         getMemoryToolsCn(toolVisibility) +
             getAvailableToolsCn(
+                chatId = chatId,
                 hasImageRecognition = hasImageRecognition,
                 chatModelHasDirectImage = chatModelHasDirectImage,
                 hasAudioRecognition = hasAudioRecognition,
@@ -385,6 +398,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
                 chatModelHasDirectVideo = chatModelHasDirectVideo,
                 safBookmarkNames = safBookmarkNames,
                 toolVisibility = toolVisibility,
+                hookMetadata = hookMetadata,
                 dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
             )
     )
@@ -543,6 +557,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
   suspend fun getSystemPromptWithCustomPrompts(
           context: Context,
           packageManager: PackageManager,
+          chatId: String?,
           workspacePath: String?,
           workspaceEnv: String? = null,
           safBookmarkNames: List<String> = emptyList(),
@@ -565,6 +580,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
           enableGroupOrchestrationHint: Boolean = false,
           groupOrchestrationRoleName: String = "",
           groupParticipantNamesText: String = "",
+          hookMetadata: Map<String, Any?> = emptyMap(),
           dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchSystemPromptComposeHooks,
           dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
   ): String {
@@ -572,6 +588,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
         dispatchSystemPromptComposeHooks(
             PromptHookContext(
                 stage = "before_compose_system_prompt",
+                chatId = chatId,
                 useEnglish = useEnglish,
                 metadata =
                     mapOf(
@@ -596,7 +613,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
                         "enableGroupOrchestrationHint" to enableGroupOrchestrationHint,
                         "groupOrchestrationRoleName" to groupOrchestrationRoleName,
                         "groupParticipantNamesText" to groupParticipantNamesText
-                    )
+                    ) + hookMetadata
             )
         )
 
@@ -604,6 +621,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
         beforeContext.systemPrompt ?: getSystemPrompt(
             context = context,
             packageManager = packageManager,
+            chatId = chatId,
             workspacePath = workspacePath,
             workspaceEnv = workspaceEnv,
             safBookmarkNames = safBookmarkNames,
@@ -622,6 +640,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
             allowedPackageNames = allowedPackageNames,
             allowedSkillNames = allowedSkillNames,
             allowedMcpServerNames = allowedMcpServerNames,
+            hookMetadata = hookMetadata,
             dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
         )
 
@@ -658,6 +677,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
     return getSystemPrompt(
         context = context,
         packageManager = packageManager,
+        chatId = null,
         workspacePath = null,
         workspaceEnv = null,
         safBookmarkNames = emptyList(),

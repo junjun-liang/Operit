@@ -118,6 +118,163 @@
             ]
         },
         {
+            "name": "request_bluetooth_permission",
+            "description": { "zh": "请求蓝牙附近设备权限。", "en": "Request Bluetooth nearby devices permission." },
+            "parameters": []
+        },
+        {
+            "name": "get_bluetooth_state",
+            "description": { "zh": "获取蓝牙适配器状态。", "en": "Get Bluetooth adapter state." },
+            "parameters": []
+        },
+        {
+            "name": "request_enable_bluetooth",
+            "description": { "zh": "打开系统蓝牙开启对话框。", "en": "Open the system dialog to enable Bluetooth." },
+            "parameters": []
+        },
+        {
+            "name": "list_bluetooth_bonded_devices",
+            "description": { "zh": "列出已配对蓝牙设备。", "en": "List bonded Bluetooth devices." },
+            "parameters": []
+        },
+        {
+            "name": "scan_bluetooth_devices",
+            "description": { "zh": "扫描附近蓝牙 Classic 与 BLE 设备。", "en": "Scan nearby Bluetooth classic and BLE devices." },
+            "parameters": [
+                { "name": "duration_ms", "description": { "zh": "扫描时长毫秒。", "en": "Scan duration in milliseconds." }, "type": "number", "required": false },
+                { "name": "include_ble", "description": { "zh": "是否包含 BLE 扫描。", "en": "Whether to include BLE scanning." }, "type": "boolean", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_connect",
+            "description": { "zh": "连接蓝牙 Classic 设备。", "en": "Connect to a Bluetooth classic device." },
+            "parameters": [
+                { "name": "address", "description": { "zh": "蓝牙 MAC 地址", "en": "Bluetooth MAC address" }, "type": "string", "required": true },
+                { "name": "uuid", "description": { "zh": "RFCOMM UUID。", "en": "RFCOMM UUID." }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_listen",
+            "description": { "zh": "监听别人连接本机的蓝牙 Classic 通道。", "en": "Listen for another device connecting to this phone over Bluetooth classic." },
+            "parameters": [
+                { "name": "name", "description": { "zh": "服务名。", "en": "Service name." }, "type": "string", "required": false },
+                { "name": "uuid", "description": { "zh": "RFCOMM UUID。", "en": "RFCOMM UUID." }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_accept",
+            "description": { "zh": "接受蓝牙 Classic 监听会话中的一个传入连接。", "en": "Accept one incoming connection from a Bluetooth classic listener." },
+            "parameters": [
+                { "name": "listener_session_id", "description": { "zh": "监听会话 ID", "en": "Listener session ID" }, "type": "string", "required": true },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_send",
+            "description": { "zh": "向蓝牙 Classic 会话发送文本或 base64 字节。", "en": "Send text or base64 bytes to a Bluetooth classic session." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "会话 ID", "en": "Session ID" }, "type": "string", "required": true },
+                { "name": "text", "description": { "zh": "UTF-8 文本", "en": "UTF-8 text" }, "type": "string", "required": false },
+                { "name": "data_base64", "description": { "zh": "base64 字节", "en": "Base64 bytes" }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_read",
+            "description": { "zh": "从蓝牙 Classic 会话读取文本或字节。", "en": "Read text or bytes from a Bluetooth classic session." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "会话 ID", "en": "Session ID" }, "type": "string", "required": true },
+                { "name": "max_bytes", "description": { "zh": "最大读取字节数。", "en": "Maximum bytes to read." }, "type": "number", "required": false },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_send_and_read",
+            "description": { "zh": "向蓝牙 Classic 会话发送后读取响应。", "en": "Send to a Bluetooth classic session and read the response." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "会话 ID", "en": "Session ID" }, "type": "string", "required": true },
+                { "name": "text", "description": { "zh": "UTF-8 文本", "en": "UTF-8 text" }, "type": "string", "required": false },
+                { "name": "data_base64", "description": { "zh": "base64 字节", "en": "Base64 bytes" }, "type": "string", "required": false },
+                { "name": "max_bytes", "description": { "zh": "最大读取字节数。", "en": "Maximum bytes to read." }, "type": "number", "required": false },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_close",
+            "description": { "zh": "关闭蓝牙 Classic、监听或 BLE 会话。", "en": "Close a Bluetooth classic, listener, or BLE session." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "会话 ID", "en": "Session ID" }, "type": "string", "required": true }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_connect",
+            "description": { "zh": "连接 BLE 设备。", "en": "Connect to a BLE device." },
+            "parameters": [
+                { "name": "address", "description": { "zh": "蓝牙 MAC 地址", "en": "Bluetooth MAC address" }, "type": "string", "required": true },
+                { "name": "auto_connect", "description": { "zh": "是否自动连接。", "en": "Whether to use auto connect." }, "type": "boolean", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_discover_services",
+            "description": { "zh": "发现 BLE 服务和 characteristic。", "en": "Discover BLE services and characteristics." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_read_characteristic",
+            "description": { "zh": "读取 BLE characteristic。", "en": "Read a BLE characteristic." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "service_uuid", "description": { "zh": "Service UUID", "en": "Service UUID" }, "type": "string", "required": true },
+                { "name": "characteristic_uuid", "description": { "zh": "Characteristic UUID", "en": "Characteristic UUID" }, "type": "string", "required": true },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_write_characteristic",
+            "description": { "zh": "写入 BLE characteristic。", "en": "Write a BLE characteristic." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "service_uuid", "description": { "zh": "Service UUID", "en": "Service UUID" }, "type": "string", "required": true },
+                { "name": "characteristic_uuid", "description": { "zh": "Characteristic UUID", "en": "Characteristic UUID" }, "type": "string", "required": true },
+                { "name": "text", "description": { "zh": "UTF-8 文本", "en": "UTF-8 text" }, "type": "string", "required": false },
+                { "name": "data_base64", "description": { "zh": "base64 字节", "en": "Base64 bytes" }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_write_and_read_characteristic",
+            "description": { "zh": "写入 BLE characteristic 后读取另一个 characteristic 响应。", "en": "Write a BLE characteristic and read another characteristic response." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "write_service_uuid", "description": { "zh": "写入 Service UUID", "en": "Write service UUID" }, "type": "string", "required": true },
+                { "name": "write_characteristic_uuid", "description": { "zh": "写入 Characteristic UUID", "en": "Write characteristic UUID" }, "type": "string", "required": true },
+                { "name": "read_service_uuid", "description": { "zh": "读取 Service UUID", "en": "Read service UUID" }, "type": "string", "required": true },
+                { "name": "read_characteristic_uuid", "description": { "zh": "读取 Characteristic UUID", "en": "Read characteristic UUID" }, "type": "string", "required": true },
+                { "name": "text", "description": { "zh": "UTF-8 文本", "en": "UTF-8 text" }, "type": "string", "required": false },
+                { "name": "data_base64", "description": { "zh": "base64 字节", "en": "Base64 bytes" }, "type": "string", "required": false },
+                { "name": "timeout_ms", "description": { "zh": "等待毫秒数。", "en": "Wait time in milliseconds." }, "type": "number", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_subscribe_characteristic",
+            "description": { "zh": "订阅或取消订阅 BLE characteristic 通知。", "en": "Subscribe or unsubscribe BLE characteristic notifications." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "service_uuid", "description": { "zh": "Service UUID", "en": "Service UUID" }, "type": "string", "required": true },
+                { "name": "characteristic_uuid", "description": { "zh": "Characteristic UUID", "en": "Characteristic UUID" }, "type": "string", "required": true },
+                { "name": "enable", "description": { "zh": "是否订阅。", "en": "Whether to subscribe." }, "type": "boolean", "required": false }
+            ]
+        },
+        {
+            "name": "bluetooth_ble_read_notifications",
+            "description": { "zh": "读取已收到的 BLE 通知。", "en": "Read received BLE notifications." },
+            "parameters": [
+                { "name": "session_id", "description": { "zh": "BLE 会话 ID", "en": "BLE session ID" }, "type": "string", "required": true },
+                { "name": "limit", "description": { "zh": "读取条数。", "en": "Number of notifications to read." }, "type": "number", "required": false }
+            ]
+        },
+        {
             "name": "get_device_info",
             "description": { "zh": "获取详细的设备信息，包括型号、操作系统版本、内存、存储、网络状态等。", "en": "Get detailed device information, including model, OS version, memory, storage, network status, etc." },
             "parameters": []
@@ -197,6 +354,126 @@ const SystemTools = (function () {
     async function get_device_location(params) {
         const result = await Tools.System.getLocation(params.high_accuracy || false, params.timeout || 10);
         return { success: true, message: '成功获取位置信息', data: result };
+    }
+    async function request_bluetooth_permission(params) {
+        const result = await Tools.System.bluetooth.requestPermission();
+        return { success: true, message: '成功请求蓝牙权限', data: result };
+    }
+    async function get_bluetooth_state(params) {
+        const result = await Tools.System.bluetooth.getState();
+        return { success: true, message: '成功获取蓝牙状态', data: result };
+    }
+    async function request_enable_bluetooth(params) {
+        const result = await Tools.System.bluetooth.requestEnable();
+        return { success: true, message: '已打开蓝牙开启请求', data: result };
+    }
+    async function list_bluetooth_bonded_devices(params) {
+        const result = await Tools.System.bluetooth.listBondedDevices();
+        return { success: true, message: '成功获取已配对蓝牙设备', data: result };
+    }
+    async function scan_bluetooth_devices(params) {
+        const result = await Tools.System.bluetooth.scan({
+            durationMs: params.duration_ms,
+            includeBle: params.include_ble
+        });
+        return { success: true, message: '成功扫描蓝牙设备', data: result };
+    }
+    async function bluetooth_connect(params) {
+        const result = await Tools.System.bluetooth.connect({
+            address: params.address,
+            uuid: params.uuid
+        });
+        return { success: true, message: '成功连接蓝牙设备', data: result };
+    }
+    async function bluetooth_listen(params) {
+        const result = await Tools.System.bluetooth.listen({
+            name: params.name,
+            uuid: params.uuid
+        });
+        return { success: true, message: '成功创建蓝牙监听', data: result };
+    }
+    async function bluetooth_accept(params) {
+        const result = await Tools.System.bluetooth.accept(params.listener_session_id, params.timeout_ms);
+        return { success: true, message: '成功接受蓝牙连接', data: result };
+    }
+    async function bluetooth_send(params) {
+        const result = await Tools.System.bluetooth.send(params.session_id, {
+            text: params.text,
+            dataBase64: params.data_base64
+        });
+        return { success: true, message: '成功发送蓝牙数据', data: result };
+    }
+    async function bluetooth_read(params) {
+        const result = await Tools.System.bluetooth.read(params.session_id, {
+            maxBytes: params.max_bytes,
+            timeoutMs: params.timeout_ms
+        });
+        return { success: true, message: '成功读取蓝牙数据', data: result };
+    }
+    async function bluetooth_send_and_read(params) {
+        const result = await Tools.System.bluetooth.sendAndRead(params.session_id, {
+            text: params.text,
+            dataBase64: params.data_base64,
+            maxBytes: params.max_bytes,
+            timeoutMs: params.timeout_ms
+        });
+        return { success: true, message: '成功发送并读取蓝牙数据', data: result };
+    }
+    async function bluetooth_close(params) {
+        const result = await Tools.System.bluetooth.close(params.session_id);
+        return { success: true, message: '成功关闭蓝牙会话', data: result };
+    }
+    async function bluetooth_ble_connect(params) {
+        const result = await Tools.System.bluetooth.ble.connect({
+            address: params.address,
+            autoConnect: params.auto_connect
+        });
+        return { success: true, message: '成功连接 BLE 设备', data: result };
+    }
+    async function bluetooth_ble_discover_services(params) {
+        const result = await Tools.System.bluetooth.ble.discoverServices(params.session_id, params.timeout_ms);
+        return { success: true, message: '成功发现 BLE 服务', data: result };
+    }
+    async function bluetooth_ble_read_characteristic(params) {
+        const result = await Tools.System.bluetooth.ble.readCharacteristic(params.session_id, {
+            serviceUuid: params.service_uuid,
+            characteristicUuid: params.characteristic_uuid,
+            timeoutMs: params.timeout_ms
+        });
+        return { success: true, message: '成功读取 BLE characteristic', data: result };
+    }
+    async function bluetooth_ble_write_characteristic(params) {
+        const result = await Tools.System.bluetooth.ble.writeCharacteristic(params.session_id, {
+            serviceUuid: params.service_uuid,
+            characteristicUuid: params.characteristic_uuid,
+            text: params.text,
+            dataBase64: params.data_base64
+        });
+        return { success: true, message: '成功写入 BLE characteristic', data: result };
+    }
+    async function bluetooth_ble_write_and_read_characteristic(params) {
+        const result = await Tools.System.bluetooth.ble.writeAndReadCharacteristic(params.session_id, {
+            writeServiceUuid: params.write_service_uuid,
+            writeCharacteristicUuid: params.write_characteristic_uuid,
+            readServiceUuid: params.read_service_uuid,
+            readCharacteristicUuid: params.read_characteristic_uuid,
+            text: params.text,
+            dataBase64: params.data_base64,
+            timeoutMs: params.timeout_ms
+        });
+        return { success: true, message: '成功写入并读取 BLE characteristic', data: result };
+    }
+    async function bluetooth_ble_subscribe_characteristic(params) {
+        const result = await Tools.System.bluetooth.ble.subscribe(params.session_id, {
+            serviceUuid: params.service_uuid,
+            characteristicUuid: params.characteristic_uuid,
+            enable: params.enable
+        });
+        return { success: true, message: '成功更新 BLE 订阅', data: result };
+    }
+    async function bluetooth_ble_read_notifications(params) {
+        const result = await Tools.System.bluetooth.ble.readNotifications(params.session_id, params.limit);
+        return { success: true, message: '成功读取 BLE 通知', data: result };
     }
     async function get_device_info(params) {
         const result = await Tools.System.getDeviceInfo();
@@ -367,6 +644,25 @@ const SystemTools = (function () {
         get_notifications: (params) => wrapToolExecution(get_notifications, params),
         get_app_usage_time: (params) => wrapToolExecution(get_app_usage_time, params),
         get_device_location: (params) => wrapToolExecution(get_device_location, params),
+        request_bluetooth_permission: (params) => wrapToolExecution(request_bluetooth_permission, params),
+        get_bluetooth_state: (params) => wrapToolExecution(get_bluetooth_state, params),
+        request_enable_bluetooth: (params) => wrapToolExecution(request_enable_bluetooth, params),
+        list_bluetooth_bonded_devices: (params) => wrapToolExecution(list_bluetooth_bonded_devices, params),
+        scan_bluetooth_devices: (params) => wrapToolExecution(scan_bluetooth_devices, params),
+        bluetooth_connect: (params) => wrapToolExecution(bluetooth_connect, params),
+        bluetooth_listen: (params) => wrapToolExecution(bluetooth_listen, params),
+        bluetooth_accept: (params) => wrapToolExecution(bluetooth_accept, params),
+        bluetooth_send: (params) => wrapToolExecution(bluetooth_send, params),
+        bluetooth_read: (params) => wrapToolExecution(bluetooth_read, params),
+        bluetooth_send_and_read: (params) => wrapToolExecution(bluetooth_send_and_read, params),
+        bluetooth_close: (params) => wrapToolExecution(bluetooth_close, params),
+        bluetooth_ble_connect: (params) => wrapToolExecution(bluetooth_ble_connect, params),
+        bluetooth_ble_discover_services: (params) => wrapToolExecution(bluetooth_ble_discover_services, params),
+        bluetooth_ble_read_characteristic: (params) => wrapToolExecution(bluetooth_ble_read_characteristic, params),
+        bluetooth_ble_write_characteristic: (params) => wrapToolExecution(bluetooth_ble_write_characteristic, params),
+        bluetooth_ble_write_and_read_characteristic: (params) => wrapToolExecution(bluetooth_ble_write_and_read_characteristic, params),
+        bluetooth_ble_subscribe_characteristic: (params) => wrapToolExecution(bluetooth_ble_subscribe_characteristic, params),
+        bluetooth_ble_read_notifications: (params) => wrapToolExecution(bluetooth_ble_read_notifications, params),
         get_device_info: (params) => wrapToolExecution(get_device_info, params),
         main,
     };
@@ -383,5 +679,24 @@ exports.execute_intent = SystemTools.execute_intent;
 exports.get_notifications = SystemTools.get_notifications;
 exports.get_app_usage_time = SystemTools.get_app_usage_time;
 exports.get_device_location = SystemTools.get_device_location;
+exports.request_bluetooth_permission = SystemTools.request_bluetooth_permission;
+exports.get_bluetooth_state = SystemTools.get_bluetooth_state;
+exports.request_enable_bluetooth = SystemTools.request_enable_bluetooth;
+exports.list_bluetooth_bonded_devices = SystemTools.list_bluetooth_bonded_devices;
+exports.scan_bluetooth_devices = SystemTools.scan_bluetooth_devices;
+exports.bluetooth_connect = SystemTools.bluetooth_connect;
+exports.bluetooth_listen = SystemTools.bluetooth_listen;
+exports.bluetooth_accept = SystemTools.bluetooth_accept;
+exports.bluetooth_send = SystemTools.bluetooth_send;
+exports.bluetooth_read = SystemTools.bluetooth_read;
+exports.bluetooth_send_and_read = SystemTools.bluetooth_send_and_read;
+exports.bluetooth_close = SystemTools.bluetooth_close;
+exports.bluetooth_ble_connect = SystemTools.bluetooth_ble_connect;
+exports.bluetooth_ble_discover_services = SystemTools.bluetooth_ble_discover_services;
+exports.bluetooth_ble_read_characteristic = SystemTools.bluetooth_ble_read_characteristic;
+exports.bluetooth_ble_write_characteristic = SystemTools.bluetooth_ble_write_characteristic;
+exports.bluetooth_ble_write_and_read_characteristic = SystemTools.bluetooth_ble_write_and_read_characteristic;
+exports.bluetooth_ble_subscribe_characteristic = SystemTools.bluetooth_ble_subscribe_characteristic;
+exports.bluetooth_ble_read_notifications = SystemTools.bluetooth_ble_read_notifications;
 exports.get_device_info = SystemTools.get_device_info;
 exports.main = SystemTools.main;

@@ -72,6 +72,9 @@ import com.ai.assistance.operit.ui.features.chat.webview.workspace.toWorkspaceCo
 import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.util.TtsCleaner
 import com.ai.assistance.operit.util.TtsSegmenter
+import com.ai.assistance.operit.ui.features.chat.util.findMentionTokens
+import com.ai.assistance.operit.ui.features.chat.util.findMentionTokenEndingAtCursor
+import com.ai.assistance.operit.ui.features.chat.util.isMentionContinuation
 import android.net.Uri
 import android.os.Build
 import androidx.annotation.RequiresApi
@@ -100,9 +103,19 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     companion object {
         private const val TAG = "ChatViewModel"
-        private const val MIN_WORKSPACE_FILE_QUERY_LENGTH = 2
         private const val SPEECH_PREVIEW_MAX = 48
     }
+
+    private data class ActiveMentionTrigger(
+        val triggerChar: Char,
+        val triggerIndex: Int,
+        val query: String,
+    )
+
+    private data class MentionDeletionNormalization(
+        val value: TextFieldValue,
+        val removedMentionToken: String? = null,
+    )
 
     private fun speechPreview(text: String): String {
         return text.replace("\n", "\\n").take(SPEECH_PREVIEW_MAX)
@@ -208,16 +221,24 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     val disableUserPreferenceDescription: StateFlow<Boolean> by lazy {
         apiConfigDelegate.disableUserPreferenceDescription
     }
-    val summaryTokenThreshold: StateFlow<Float> by lazy { apiConfigDelegate.summaryTokenThreshold }
-    val enableSummary: StateFlow<Boolean> by lazy { apiConfigDelegate.enableSummary }
-    val enableSummaryByMessageCount: StateFlow<Boolean> by lazy { apiConfigDelegate.enableSummaryByMessageCount }
-    val summaryMessageCountThreshold: StateFlow<Int> by lazy { apiConfigDelegate.summaryMessageCountThreshold }
+    val summaryTokenThreshold: StateFlow<Float> by lazy { apiConfigDelegate.effectiveSummaryTokenThreshold }
+    val enableSummary: StateFlow<Boolean> by lazy { apiConfigDelegate.effectiveEnableSummary }
+    val enableSummaryByMessageCount: StateFlow<Boolean> by lazy {
+        apiConfigDelegate.effectiveEnableSummaryByMessageCount
+    }
+    val summaryMessageCountThreshold: StateFlow<Int> by lazy {
+        apiConfigDelegate.effectiveSummaryMessageCountThreshold
+    }
 
     // 上下文长度
-    val maxWindowSizeInK: StateFlow<Float> by lazy { apiConfigDelegate.contextLength }
-    val baseContextLengthInK: StateFlow<Float> by lazy { apiConfigDelegate.baseContextLength }
-    val maxContextLengthInK: StateFlow<Float> by lazy { apiConfigDelegate.maxContextLengthSetting }
-    val enableMaxContextMode: StateFlow<Boolean> by lazy { apiConfigDelegate.enableMaxContextMode }
+    val maxWindowSizeInK: StateFlow<Float> by lazy { apiConfigDelegate.effectiveContextLength }
+    val baseContextLengthInK: StateFlow<Float> by lazy { apiConfigDelegate.effectiveBaseContextLength }
+    val maxContextLengthInK: StateFlow<Float> by lazy {
+        apiConfigDelegate.effectiveMaxContextLengthSetting
+    }
+    val enableMaxContextMode: StateFlow<Boolean> by lazy {
+        apiConfigDelegate.effectiveEnableMaxContextMode
+    }
 
     // 聊天历史相关
     val chatHistory: StateFlow<List<ChatMessage>> by lazy { chatHistoryDelegate.chatHistory }
@@ -346,68 +367,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun handleSharedLinks(urls: List<String>, targetChatId: String? = null) {
-        AppLogger.d(TAG, "handleSharedLinks called with ${urls.size} link(s)")
-        urls.forEachIndexed { index, url ->
-            AppLogger.d(TAG, "  [$index] URL: $url")
-        }
-
-        viewModelScope.launch {
-            try {
-                val chatId = resolveTargetChatIdForSharedContent(targetChatId)
-                if (chatId == null) {
-                    AppLogger.e(TAG, "Failed to prepare target chat for shared links")
-                    uiStateDelegate.showErrorMessage(
-                        context.getString(R.string.chat_prepare_shared_target_failed)
-                    )
-                    return@launch
-                }
-
-                messageProcessingDelegate.setInputProcessingStateForChat(
-                    chatId,
-                    InputProcessingState.Processing(context.getString(R.string.chat_processing_shared_files))
-                )
-
-                val now = System.currentTimeMillis()
-                val attachmentsToAdd = urls
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .mapIndexed { index, url ->
-                        val host = runCatching { Uri.parse(url).host }.getOrNull()
-                        val fileName = if (!host.isNullOrBlank()) "${host}.url" else "link.url"
-                        AttachmentInfo(
-                            filePath = "link_${now}_$index",
-                            fileName = fileName,
-                            mimeType = "text/plain",
-                            fileSize = url.length.toLong(),
-                            content = url
-                        )
-                    }
-
-                attachmentDelegate.addAttachments(attachmentsToAdd)
-
-                messageProcessingDelegate.updateUserMessage(
-                    TextFieldValue(context.getString(R.string.chat_prefill_check_file))
-                )
-
-                messageProcessingDelegate.setInputProcessingStateForChat(
-                    chatId,
-                    InputProcessingState.Idle
-                )
-
-                uiStateDelegate.showToast(context.getString(R.string.chat_added_files_count, attachmentsToAdd.size))
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "处理分享链接失败", e)
-                uiStateDelegate.showErrorMessage(context.getString(R.string.chat_process_shared_files_failed, e.message ?: ""))
-                val chatId = currentChatId.value
-                if (chatId != null) {
-                    messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Idle)
-                }
-            }
-        }
-    }
-
     // 添加一个用于跟踪附件面板状态的变量
     private val _attachmentPanelState = MutableStateFlow(false)
     val attachmentPanelState: StateFlow<Boolean> = _attachmentPanelState
@@ -434,13 +393,22 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     private val _webViewRefreshCounter = MutableStateFlow(0)
     val webViewRefreshCounter: StateFlow<Int> = _webViewRefreshCounter
 
-    // 控制工作区文件选择器的可见性
-    private val _showWorkspaceFileSelector = MutableStateFlow(false)
-    val showWorkspaceFileSelector: StateFlow<Boolean> = _showWorkspaceFileSelector.asStateFlow()
+    // 控制 @ mention 建议面板的可见性
+    // 插入总结对话框状态
+    private val _showInsertSummaryDialog = MutableStateFlow(false)
+    val showInsertSummaryDialog: StateFlow<Boolean> = _showInsertSummaryDialog.asStateFlow()
+    private val _pendingInsertSummaryMessage = MutableStateFlow<ChatMessage?>(null)
+    val pendingInsertSummaryMessage: StateFlow<ChatMessage?> = _pendingInsertSummaryMessage.asStateFlow()
 
-    // 工作区文件搜索词
-    private val _workspaceFileSearchQuery = MutableStateFlow("")
-    val workspaceFileSearchQuery: StateFlow<String> = _workspaceFileSearchQuery.asStateFlow()
+    private val _showMentionSuggestionPanel = MutableStateFlow(false)
+    val showMentionSuggestionPanel: StateFlow<Boolean> = _showMentionSuggestionPanel.asStateFlow()
+
+    // 当前 @ mention 的搜索词
+    private val _mentionSearchQuery = MutableStateFlow("")
+    val mentionSearchQuery: StateFlow<String> = _mentionSearchQuery.asStateFlow()
+
+    private val _mentionSuggestionTriggerChar = MutableStateFlow<Char?>(null)
+    val mentionSuggestionTriggerChar: StateFlow<Char?> = _mentionSuggestionTriggerChar.asStateFlow()
 
     private val _workspaceCommandExecutionState =
         MutableStateFlow<WorkspaceCommandExecutionState?>(null)
@@ -470,6 +438,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 apiEndpoint
             ) { initialized, currentApiKey, currentProviderType, currentApiEndpoint ->
                 initialized &&
+                    currentProviderType == ApiProviderType.DEEPSEEK &&
                     ApiProviderConfigs.requiresApiKey(
                         currentProviderType,
                         currentApiEndpoint
@@ -727,8 +696,11 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    suspend fun loadChatMessageLocatorPreviews(chatId: String): List<ChatMessageLocatorPreview> =
-        chatHistoryDelegate.loadChatMessageLocatorPreviews(chatId)
+    suspend fun loadChatMessageLocatorPreviews(
+        chatId: String,
+        query: String = "",
+    ): List<ChatMessageLocatorPreview> =
+        chatHistoryDelegate.loadChatMessageLocatorPreviews(chatId, query)
 
     suspend fun revealMessageForCurrentChat(targetTimestamp: Long): Boolean =
         chatHistoryDelegate.revealMessageForCurrentChat(targetTimestamp)
@@ -842,8 +814,27 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         uiStateDelegate.showToast(context.getString(R.string.chat_branch_created))
     }
 
-    /** 插入总结 */
+    /** 弹出自定义总结规则对话框，确认后再执行插入总结 */
     fun insertSummary(message: ChatMessage) {
+        _pendingInsertSummaryMessage.value = message
+        _showInsertSummaryDialog.value = true
+    }
+
+    /** 取消插入总结对话框 */
+    fun cancelInsertSummary() {
+        _showInsertSummaryDialog.value = false
+        _pendingInsertSummaryMessage.value = null
+    }
+
+    /** 确认插入总结（携带自定义规则） */
+    fun confirmInsertSummary(customRules: String?) {
+        val message = _pendingInsertSummaryMessage.value ?: return
+        _showInsertSummaryDialog.value = false
+        _pendingInsertSummaryMessage.value = null
+        performInsertSummary(message, customRules)
+    }
+
+    private fun performInsertSummary(message: ChatMessage, customRules: String?) {
         viewModelScope.launch {
             try {
                 // 获取当前会话ID并绑定
@@ -897,7 +888,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     enhancedAiService!!,
                     messagesToSummarize,
                     autoContinue = false,
-                    isGroupChat = isGroupChat
+                    isGroupChat = isGroupChat,
+                    summaryCustomRules = customRules?.takeIf { it.isNotBlank() }
                 )
 
                 if (summaryMessage != null) {
@@ -963,11 +955,26 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     fun deleteMessages(indices: Set<Int>) {
         viewModelScope.launch {
             AppLogger.d(TAG, "准备批量删除消息，索引: $indices")
-            // 按降序排列索引后依次删除，避免索引偏移问题
-            val sortedIndices = indices.sortedDescending()
-            sortedIndices.forEach { index ->
-                chatHistoryDelegate.deleteMessage(index)
+            val chatIdSnapshot = chatHistoryDelegate.currentChatId.value
+            if (chatIdSnapshot == null) {
+                uiStateDelegate.showToast(context.getString(R.string.chat_no_active_conversation))
+                return@launch
             }
+
+            val historySnapshot = chatHistoryDelegate.chatHistory.value
+            val sortedIndices = indices.sortedDescending()
+            val timestamps = mutableListOf<Long>()
+            for (index in sortedIndices) {
+                val message = historySnapshot.getOrNull(index)
+                if (message == null) {
+                    AppLogger.w(TAG, "批量删除消息索引无效: index=$index, historySize=${historySnapshot.size}")
+                    uiStateDelegate.showErrorMessage(context.getString(R.string.chat_invalid_message_index))
+                    return@launch
+                }
+                timestamps += message.timestamp
+            }
+
+            chatHistoryDelegate.deleteMessagesByTimestamps(chatIdSnapshot, timestamps)
             AppLogger.d(TAG, "批量删除完成")
         }
     }
@@ -1337,32 +1344,20 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     // 消息处理相关方法
     fun updateUserMessage(value: TextFieldValue) {
-        messageProcessingDelegate.updateUserMessage(value)
-        val message = value.text
-        // 当用户输入@且工作-区打开时，显示文件选择器
-        // 新逻辑：提取@后的内容作为搜索词，并根据条件决定是否显示选择器
-        val lastAt = message.lastIndexOf('@')
-        if (isWorkspaceOpen.value && lastAt != -1) {
-            val substringAfterAt = message.substring(lastAt + 1)
-            if (substringAfterAt.any(Char::isWhitespace)) {
-                // 如果@后面出现空白字符，则认为提及结束，隐藏选择器并清空搜索词
-                _showWorkspaceFileSelector.value = false
-                _workspaceFileSearchQuery.value = ""
-            } else {
-                val normalizedQuery = substringAfterAt.trim()
-                if (normalizedQuery.length >= MIN_WORKSPACE_FILE_QUERY_LENGTH) {
-                    _showWorkspaceFileSelector.value = true
-                    _workspaceFileSearchQuery.value = normalizedQuery
-                } else {
-                    _showWorkspaceFileSelector.value = false
-                    _workspaceFileSearchQuery.value = ""
-                }
-            }
-        } else {
-            // 如果没有@或者工作区未打开，则隐藏并清空
-            _showWorkspaceFileSelector.value = false
-            _workspaceFileSearchQuery.value = ""
+        val normalization = normalizeMentionDeletion(userMessage.value, value)
+        val normalizedValue = normalization.value
+        val removedMentionToken = normalization.removedMentionToken
+
+        if (
+            !removedMentionToken.isNullOrBlank() &&
+                !containsMentionToken(normalizedValue.text, removedMentionToken)
+        ) {
+            attachmentDelegate.removePackageAttachment(removedMentionToken)
+            attachmentDelegate.removeWorkspaceMentionAttachment(removedMentionToken)
         }
+
+        messageProcessingDelegate.updateUserMessage(normalizedValue)
+        updateMentionSuggestionState(normalizedValue)
     }
 
     fun insertRoleMention(roleName: String) {
@@ -1392,15 +1387,182 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         updateUserMessage(TextFieldValue(newText, selection = TextRange(newCursor)))
     }
 
+    fun replaceCurrentMentionToken(token: String) {
+        val trimmedToken = token.trim()
+        if (trimmedToken.isEmpty()) return
+
+        val current = userMessage.value
+        val activeMention = findActiveMentionTrigger(current) ?: return
+        val text = current.text
+        val cursor = current.selection.start.coerceIn(0, text.length)
+        val before = text.substring(0, activeMention.triggerIndex)
+        val after = text.substring(cursor)
+        val insertion =
+            buildString {
+                append(activeMention.triggerChar)
+                append(trimmedToken)
+                if (after.isEmpty() || !after.first().isWhitespace()) {
+                    append(' ')
+                }
+            }
+
+        val newText = before + insertion + after
+        val newCursor = (before.length + insertion.length).coerceAtMost(newText.length)
+        updateUserMessage(TextFieldValue(newText, selection = TextRange(newCursor)))
+    }
+
+    fun selectMentionPackage(packageName: String) {
+        val trimmedPackageName = packageName.trim()
+        if (trimmedPackageName.isEmpty()) return
+
+        replaceCurrentMentionToken(trimmedPackageName)
+        attachMentionPackage(trimmedPackageName)
+        hideMentionSuggestionPanel()
+    }
+
+    fun selectMentionWorkspaceEntry(relativePath: String) {
+        val normalizedRelativePath = relativePath.trim().replace('\\', '/')
+        if (normalizedRelativePath.isEmpty()) return
+
+        replaceCurrentMentionToken(normalizedRelativePath)
+
+        val activeChat =
+            chatHistories.value.firstOrNull { it.id == currentChatId.value }
+        val workspacePath = activeChat?.workspace
+        if (!workspacePath.isNullOrBlank()) {
+            attachMentionWorkspaceEntry(
+                workspacePath = workspacePath,
+                relativePath = normalizedRelativePath,
+                workspaceEnv = activeChat.workspaceEnv,
+            )
+        }
+
+        hideMentionSuggestionPanel()
+    }
+
     fun sendUserMessage(promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT) {
+        hideMentionSuggestionPanel()
         messageCoordinationDelegate.sendUserMessage(promptFunctionType)
     }
 
     fun sendTextMessage(text: String, promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT) {
+        hideMentionSuggestionPanel()
         messageCoordinationDelegate.sendUserMessage(
             promptFunctionType = promptFunctionType,
             messageTextOverride = text
         )
+    }
+
+    suspend fun removeLastVisibleUserMessageFromCurrentChat(text: String): Boolean {
+        val chatId = currentChatId.value ?: return false
+        val messageText = text.trim()
+        if (messageText.isBlank()) return false
+
+        val lastMessage = chatHistory.value.lastOrNull() ?: return false
+        if (lastMessage.sender != "user" || lastMessage.content != messageText) {
+            AppLogger.w(
+                TAG,
+                "Waifu merge send expected last visible user message, but found sender=${lastMessage.sender}, contentLength=${lastMessage.content.length}"
+            )
+            return false
+        }
+
+        chatHistoryDelegate.deleteMessagesByTimestamps(chatId, listOf(lastMessage.timestamp))
+        return true
+    }
+
+    suspend fun addVisibleUserMessageToCurrentChat(text: String) {
+        val messageText = text.trim()
+        if (messageText.isBlank()) return
+
+        val chatId = currentChatId.value ?: return
+        if (!chatHistoryDelegate.hasUserMessage(chatId)) {
+            chatHistoryDelegate.updateChatTitle(chatId, messageText)
+        }
+        chatHistoryDelegate.addMessageToChat(
+            ChatMessage(
+                sender = "user",
+                content = messageText,
+                roleName = context.getString(R.string.message_role_user)
+            ),
+            chatId
+        )
+    }
+
+    private fun normalizeMentionDeletion(
+        previous: TextFieldValue,
+        proposed: TextFieldValue,
+    ): MentionDeletionNormalization {
+        if (previous.selection.start != previous.selection.end) return MentionDeletionNormalization(proposed)
+        if (proposed.selection.start != proposed.selection.end) return MentionDeletionNormalization(proposed)
+        if (previous.text.length != proposed.text.length + 1) return MentionDeletionNormalization(proposed)
+
+        val oldCursor = previous.selection.start.coerceIn(0, previous.text.length)
+        val newCursor = proposed.selection.start.coerceIn(0, proposed.text.length)
+        if (newCursor != oldCursor - 1) return MentionDeletionNormalization(proposed)
+
+        val expectedText = previous.text.removeRange(newCursor, oldCursor)
+        if (expectedText != proposed.text) return MentionDeletionNormalization(proposed)
+
+        val mentionToken =
+            findMentionTokenEndingAtCursor(previous.text, oldCursor)
+                ?: return MentionDeletionNormalization(proposed)
+        val removedMentionToken =
+            previous.text.substring(mentionToken.start + 1, mentionToken.contentEndExclusive).trim()
+        val normalizedText = previous.text.removeRange(mentionToken.start, mentionToken.endExclusive)
+        return MentionDeletionNormalization(
+            value =
+                proposed.copy(
+                    text = normalizedText,
+                    selection = TextRange(mentionToken.start),
+                ),
+            removedMentionToken = removedMentionToken.ifBlank { null },
+        )
+    }
+
+    private fun attachMentionPackage(packageName: String) {
+        viewModelScope.launch {
+            try {
+                attachmentDelegate.attachPackage(packageName)
+                if (!containsMentionToken(userMessage.value.text, packageName)) {
+                    attachmentDelegate.removePackageAttachment(packageName)
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "添加 mention 包附件失败", e)
+                uiStateDelegate.showToast(context.getString(R.string.attachment_package_failed, packageName))
+            }
+        }
+    }
+
+    private fun attachMentionWorkspaceEntry(
+        workspacePath: String,
+        relativePath: String,
+        workspaceEnv: String?,
+    ) {
+        viewModelScope.launch {
+            try {
+                attachmentDelegate.attachWorkspaceMention(
+                    workspacePath = workspacePath,
+                    relativePath = relativePath,
+                    workspaceEnv = workspaceEnv,
+                )
+                if (!containsMentionToken(userMessage.value.text, relativePath)) {
+                    attachmentDelegate.removeWorkspaceMentionAttachment(relativePath)
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "添加 mention 工作区附件失败", e)
+                uiStateDelegate.showToast(context.getString(R.string.attachment_cannot_attach, relativePath))
+            }
+        }
+    }
+
+    private fun containsMentionToken(text: String, token: String): Boolean {
+        val trimmedToken = token.trim()
+        if (trimmedToken.isEmpty()) return false
+
+        return findMentionTokens(text).any { mentionToken ->
+            text.substring(mentionToken.start + 1, mentionToken.contentEndExclusive) == trimmedToken
+        }
     }
 
     fun cancelCurrentMessage() {
@@ -1478,18 +1640,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         floatingWindowDelegate.toggleFloatingMode(colorScheme, typography)
     }
 
-    // 权限相关方法
-    fun toggleMasterPermission() {
+    fun setMasterPermissionLevel(level: PermissionLevel) {
         viewModelScope.launch {
-            val newLevel =
-                    if (masterPermissionLevel.value == PermissionLevel.ASK) {
-                        PermissionLevel.ALLOW
-                    } else {
-                        PermissionLevel.ASK
-                    }
-            toolPermissionSystem.saveMasterSwitch(newLevel)
-
-            // 移除Toast提示
+            toolPermissionSystem.saveMasterSwitch(level)
         }
     }
 
@@ -1544,9 +1697,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         uiStateDelegate.showToast(context.getString(R.string.chat_inserted_attachment_ref, attachment.fileName))
     }
 
-    /** 隐藏工作区文件选择器 */
-    fun hideWorkspaceFileSelector() {
-        _showWorkspaceFileSelector.value = false
+    /** 隐藏 @ mention 建议面板 */
+    fun hideMentionSuggestionPanel() {
+        clearMentionSuggestionState()
     }
 
     /** Captures the current screen content and attaches it to the message */
@@ -1680,6 +1833,72 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    /** Attaches a package's prompt content to the current message as an attachment */
+    fun attachPackage(packageName: String) {
+        viewModelScope.launch {
+            try {
+                attachmentDelegate.attachPackage(packageName)
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "添加包附件失败", e)
+                uiStateDelegate.showToast(context.getString(R.string.attachment_package_failed, packageName))
+            }
+        }
+    }
+
+    private fun updateMentionSuggestionState(value: TextFieldValue) {
+        val activeMention = findActiveMentionTrigger(value)
+        if (activeMention == null) {
+            clearMentionSuggestionState()
+            return
+        }
+
+        _showMentionSuggestionPanel.value = true
+        _mentionSuggestionTriggerChar.value = activeMention.triggerChar
+        _mentionSearchQuery.value = activeMention.query
+    }
+
+    private fun clearMentionSuggestionState() {
+        _showMentionSuggestionPanel.value = false
+        _mentionSuggestionTriggerChar.value = null
+        _mentionSearchQuery.value = ""
+    }
+
+    private fun findActiveMentionTrigger(value: TextFieldValue): ActiveMentionTrigger? {
+        val text = value.text
+        val cursor = value.selection.start.coerceIn(0, text.length)
+        var index = cursor - 1
+        while (index >= 0) {
+            val currentChar = text[index]
+            if (currentChar.isWhitespace()) {
+                return null
+            }
+            if (currentChar != '@' && currentChar != '/') {
+                index -= 1
+                continue
+            }
+            if (currentChar == '@' && index > 0 && isMentionContinuation(text[index - 1], '@')) {
+                index -= 1
+                continue
+            }
+            if (currentChar == '/' && index > 0 && !text[index - 1].isWhitespace()) {
+                index -= 1
+                continue
+            }
+
+            val query = text.substring(index + 1, cursor)
+            if (query.any(Char::isWhitespace)) {
+                return null
+            }
+
+            return ActiveMentionTrigger(
+                triggerChar = currentChar,
+                triggerIndex = index,
+                query = query.trim(),
+            )
+        }
+        return null
+    }
+
     private suspend fun awaitCurrentChat(chatId: String, maxWaitCount: Int = 40): Boolean {
         var waitCount = 0
         while (currentChatId.value != chatId && waitCount < maxWaitCount) {
@@ -1737,7 +1956,34 @@ class ChatViewModel(private val context: Context) : ViewModel() {
      * Handles shared files from external apps
      * Attaches files to the selected chat or a newly created chat, then pre-fills the message
      */
-    fun handleSharedFiles(uris: List<Uri>, targetChatId: String? = null) {
+    fun handleSharedText(text: String, targetChatId: String? = null) {
+        val sharedText = text.trim()
+        if (sharedText.isBlank()) return
+
+        viewModelScope.launch {
+            try {
+                val chatId = resolveTargetChatIdForSharedContent(targetChatId)
+                if (chatId == null) {
+                    AppLogger.e(TAG, "Failed to prepare target chat for shared text")
+                    uiStateDelegate.showErrorMessage(
+                        context.getString(R.string.chat_prepare_shared_target_failed)
+                    )
+                    return@launch
+                }
+
+                messageProcessingDelegate.updateUserMessage(
+                    TextFieldValue(sharedText)
+                )
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "处理分享文本失败", e)
+                uiStateDelegate.showErrorMessage(
+                    context.getString(R.string.chat_process_shared_files_failed, e.message ?: "")
+                )
+            }
+        }
+    }
+
+    fun handleSharedFiles(uris: List<Uri>, targetChatId: String? = null, sharedText: String? = null) {
         AppLogger.d(TAG, "handleSharedFiles called with ${uris.size} file(s)")
         uris.forEachIndexed { index, uri ->
             AppLogger.d(TAG, "  [$index] URI: $uri")
@@ -1772,9 +2018,19 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 }
                 AppLogger.d(TAG, "All files attached successfully")
                 
-                // Set the pre-filled message
-                AppLogger.d(TAG, "Setting pre-filled message")
-                messageProcessingDelegate.updateUserMessage(TextFieldValue(context.getString(R.string.chat_prefill_check_file)))
+                if (messageProcessingDelegate.userMessage.value.text.isBlank()) {
+                    AppLogger.d(TAG, "Setting pre-filled message")
+                    val text = sharedText?.trim()
+                    if (!text.isNullOrBlank()) {
+                        messageProcessingDelegate.updateUserMessage(
+                            TextFieldValue(text)
+                        )
+                    } else {
+                        messageProcessingDelegate.updateUserMessage(
+                            TextFieldValue(context.getString(R.string.chat_prefill_check_file))
+                        )
+                    }
+                }
 
                 // Clear processing state
                 messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Idle)
@@ -2841,6 +3097,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     fun manuallyUpdateMemory() {
         messageCoordinationDelegate.manuallyUpdateMemory()
+    }
+
+    fun enqueueSelectedMessagesForMemoryAutoSave(messages: List<ChatMessage>) {
+        messageCoordinationDelegate.enqueueSelectedMessagesForMemoryAutoSave(messages)
     }
 
     fun manuallySummarizeConversation() {

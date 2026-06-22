@@ -57,9 +57,9 @@ import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.data.api.ArtifactProjectNodeResponse
 import com.ai.assistance.operit.data.api.GitHubIssue
 import com.ai.assistance.operit.data.model.ToolResult
-import com.ai.assistance.operit.ui.features.packages.market.ARTIFACT_MARKET_VISIBILITY_LABELS
 import com.ai.assistance.operit.ui.features.packages.market.ArtifactPublishClusterContext
 import com.ai.assistance.operit.ui.features.packages.market.LocalArtifactInstallStateKind
+import com.ai.assistance.operit.ui.features.packages.market.MarketReviewState
 import com.ai.assistance.operit.ui.features.packages.market.PluginCreationIntent
 import com.ai.assistance.operit.ui.features.packages.market.PublishArtifactType
 import com.ai.assistance.operit.ui.features.packages.market.UnifiedMarketDetailAction
@@ -77,8 +77,9 @@ import com.ai.assistance.operit.ui.features.packages.market.UnifiedMarketDetailS
 import com.ai.assistance.operit.ui.features.packages.market.buildMarketCommentReplyDraft
 import com.ai.assistance.operit.ui.features.packages.market.formatMarketDetailCompactDate
 import com.ai.assistance.operit.ui.features.packages.market.formatMarketDetailDate
-import com.ai.assistance.operit.ui.features.packages.market.hasAnyLabelName
+import com.ai.assistance.operit.ui.features.packages.market.labelResId
 import com.ai.assistance.operit.ui.features.packages.market.marketDetailInitial
+import com.ai.assistance.operit.ui.features.packages.market.resolveArtifactReviewSnapshot
 import com.ai.assistance.operit.ui.features.packages.screens.artifact.viewmodel.ArtifactProjectDetailViewModel
 import com.ai.assistance.operit.ui.features.packages.utils.ArtifactIssueParser
 import kotlinx.coroutines.Dispatchers
@@ -136,19 +137,18 @@ fun ArtifactDetailScreen(
     val isReacting by viewModel.isReacting.collectAsState()
     val installingNodeIds by viewModel.installingNodeIds.collectAsState()
     val isRefreshingInstalledArtifacts by viewModel.isRefreshingInstalledArtifacts.collectAsState()
-    val isApprovedForMarket = remember(issue) { issue.hasAnyLabelName(ARTIFACT_MARKET_VISIBILITY_LABELS) }
-    val pendingPublicationMessageResId =
-        remember(entryPoint, issue.state, isApprovedForMarket, projectId, errorMessage) {
-            pendingPublicationMessageResId(
+    val review = remember(issue) { issue.resolveArtifactReviewSnapshot() }
+
+    val previewNode =
+        remember(issue, info, entryPoint, review.state) {
+            buildArtifactPreviewNode(
+                issue = issue,
+                info = info,
                 entryPoint = entryPoint,
-                issueState = issue.state,
-                isApprovedForMarket = isApprovedForMarket,
-                projectId = projectId,
-                errorMessage = errorMessage
+                reviewState = review.state
             )
         }
-
-    val node = selectedNode
+    val node = selectedNode ?: previewNode
     if (node == null) {
         if (isLoading) {
             Box(
@@ -161,16 +161,15 @@ fun ArtifactDetailScreen(
                 )
             }
         } else {
-            InvalidArtifactMetadataScreen(
-                messageResId = pendingPublicationMessageResId ?: R.string.invalid_artifact_metadata
-            )
+            InvalidArtifactMetadataScreen()
         }
         return
     }
+    val isPreviewMode = previewNode != null && selectedNode == null
 
     val currentComments = commentsMap[node.issue.number].orEmpty()
     val currentReactions = reactionsMap[node.issue.number].orEmpty()
-    val downloads = project?.downloads ?: 0
+    val downloads = if (isPreviewMode) 0 else project?.downloads ?: 0
     val likes =
         if (currentReactions.isNotEmpty()) {
             currentReactions.count { it.content == "+1" }
@@ -190,10 +189,20 @@ fun ArtifactDetailScreen(
     val hasHeart =
         currentUserLogin != null &&
             currentReactions.any { it.content == "heart" && it.user.login == currentUserLogin }
-    val installState = viewModel.installState(node)
-    val isInstalling = installingNodeIds.contains(node.nodeId)
-    val isCompatible = viewModel.isCompatible(node)
-    val supportedVersionLabel = viewModel.supportedVersionLabel(node)
+    val installState =
+        if (isPreviewMode) {
+            LocalArtifactInstallStateKind.NOT_INSTALLED
+        } else {
+            viewModel.installState(node)
+        }
+    val isInstalling = !isPreviewMode && installingNodeIds.contains(node.nodeId)
+    val isCompatible = if (isPreviewMode) false else viewModel.isCompatible(node)
+    val supportedVersionLabel =
+        if (isPreviewMode) {
+            formatPreviewSupportedVersionLabel(info)
+        } else {
+            viewModel.supportedVersionLabel(node)
+        }
 
     var commentText by remember(node.issue.number) { mutableStateOf("") }
     var showCommentDialog by remember(node.issue.number) { mutableStateOf(false) }
@@ -209,7 +218,7 @@ fun ArtifactDetailScreen(
         viewModel.refreshInstalledArtifacts()
     }
 
-    errorMessage?.takeIf { pendingPublicationMessageResId == null }?.let { error ->
+    errorMessage?.takeIf { !isPreviewMode }?.let { error ->
         LaunchedEffect(error) {
             Toast.makeText(context, error, Toast.LENGTH_LONG).show()
             viewModel.clearError()
@@ -222,7 +231,8 @@ fun ArtifactDetailScreen(
             installState = installState,
             isInstalling = isInstalling,
             isRefreshingInstalledArtifacts = isRefreshingInstalledArtifacts,
-            artifactType = artifactType
+            artifactType = artifactType,
+            isPreviewMode = isPreviewMode
         )
 
     val header =
@@ -321,12 +331,30 @@ fun ArtifactDetailScreen(
                     icon = Icons.Default.Info
                 )
             )
-            addIfNotBlank("项目簇", node.projectId, Icons.Default.Tag)
-            addIfNotBlank("节点 ID", node.nodeId, Icons.Default.Tag)
+            addIfNotBlank(stringResource(R.string.artifact_detail_project_cluster), node.projectId, Icons.Default.Tag)
+            addIfNotBlank(stringResource(R.string.artifact_detail_node_id), node.nodeId, Icons.Default.Tag)
             addIfNotBlank(stringResource(R.string.asset_file_label), node.assetName, Icons.Default.Info)
             addIfNotBlank(stringResource(R.string.release_tag_label), node.releaseTag, Icons.Default.Tag)
             addIfNotBlank(stringResource(R.string.sha256_label), node.sha256, Icons.Default.Info)
             addIfNotBlank(stringResource(R.string.source_file_label), node.sourceFileName, Icons.Default.Info)
+            add(
+                UnifiedMarketDetailInfoRow(
+                    label = stringResource(R.string.market_review_status_label),
+                    value = stringResource(review.state.labelResId()),
+                    icon = Icons.Default.Check
+                )
+            )
+            if (review.reasons.isNotEmpty()) {
+                add(
+                    UnifiedMarketDetailInfoRow(
+                        label = stringResource(R.string.market_review_reasons_label),
+                        value = review.reasons.joinToString(separator = " / ") { reason ->
+                            context.getString(reason.labelResId())
+                        },
+                        icon = Icons.Default.Info
+                    )
+                )
+            }
             add(
                 UnifiedMarketDetailInfoRow(
                     label = stringResource(R.string.market_detail_published_label),
@@ -396,6 +424,19 @@ fun ArtifactDetailScreen(
             }
         )
 
+    val detailBanner =
+        buildArtifactPreviewBanner(
+            isPreviewMode = isPreviewMode,
+            reviewState = review.state,
+            reasons = review.reasons
+        ) ?: buildArtifactBanner(
+            node = node,
+            installState = installState,
+            isCompatible = isCompatible,
+            currentAppVersion = viewModel.currentAppVersion,
+            supportedVersionLabel = supportedVersionLabel
+        )
+
     UnifiedMarketDetailScreen(
         onNavigateBack = onNavigateBack,
         header = header,
@@ -414,14 +455,7 @@ fun ArtifactDetailScreen(
                 icon = primaryActionUi.icon
             ),
         secondaryAction = null,
-        banner =
-            buildArtifactBanner(
-                node = node,
-                installState = installState,
-                isCompatible = isCompatible,
-                currentAppVersion = viewModel.currentAppVersion,
-                supportedVersionLabel = supportedVersionLabel
-            ),
+        banner = detailBanner,
         sections = sections,
         overviewExtraContent = {
             ArtifactNodeContinuePublishCard(
@@ -511,7 +545,7 @@ fun ArtifactDetailScreen(
                 creatorSetupRunning = false
                 creatorSetupResult = null
             },
-            title = { Text("基于当前节点继续开发") },
+            title = { Text(stringResource(R.string.artifact_detail_continue_develop_current_node)) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -521,7 +555,7 @@ fun ArtifactDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "1. 拉取 Skill 更新",
+                            text = stringResource(R.string.artifact_detail_step_pull_skill_update),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -576,7 +610,7 @@ fun ArtifactDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "2. 切换或下载当前版本",
+                            text = stringResource(R.string.artifact_detail_step_switch_or_download_version),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -613,19 +647,19 @@ fun ArtifactDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "3. 输入需求开始创作",
+                            text = stringResource(R.string.artifact_detail_step_enter_requirement),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "会在此版本基础上继续开发，并强提醒目录限制、types 同步和编译方式。",
+                            text = stringResource(R.string.artifact_detail_continue_develop_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         OutlinedTextField(
                             value = creationRequirement,
                             onValueChange = { creationRequirement = it },
-                            label = { Text("这次想让 AI 做什么") },
+                            label = { Text(stringResource(R.string.artifact_detail_ai_requirement_label)) },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -650,7 +684,7 @@ fun ArtifactDetailScreen(
                         )
                     }
                 ) {
-                    Text("开始基于开发")
+                    Text(stringResource(R.string.artifact_detail_start_based_development))
                 }
             },
             dismissButton = {
@@ -686,12 +720,12 @@ private fun ArtifactNodeContinuePublishCard(
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "在此版本基础上更新",
+                text = stringResource(R.string.artifact_detail_update_based_on_version),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "你可以直接基于当前版本发布新版本，也可以先继续创作，再决定什么时候发布。",
+                text = stringResource(R.string.artifact_detail_update_based_on_version_hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -708,7 +742,7 @@ private fun ArtifactNodeContinuePublishCard(
                 )
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(4.dp))
                 Text(
-                    text = "发布新版本",
+                    text = stringResource(R.string.artifact_detail_publish_new_version),
                     style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp)
                 )
             }
@@ -725,49 +759,12 @@ private fun ArtifactNodeContinuePublishCard(
                 )
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(4.dp))
                 Text(
-                    text = "创作新版本",
+                    text = stringResource(R.string.artifact_detail_create_new_version),
                     style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp)
                 )
             }
         }
     }
-}
-
-private fun pendingPublicationMessageResId(
-    entryPoint: ArtifactDetailEntryPoint,
-    issueState: String,
-    isApprovedForMarket: Boolean,
-    projectId: String,
-    errorMessage: String?
-): Int? {
-    if (entryPoint != ArtifactDetailEntryPoint.MANAGE) {
-        return null
-    }
-    if (!issueState.equals("open", ignoreCase = true)) {
-        return null
-    }
-    if (!isMissingArtifactProjectError(projectId, errorMessage)) {
-        return null
-    }
-    return if (isApprovedForMarket) {
-        R.string.artifact_publication_approved_waiting_schedule
-    } else {
-        R.string.artifact_publication_pending_review_waiting_schedule
-    }
-}
-
-private fun isMissingArtifactProjectError(
-    projectId: String,
-    errorMessage: String?
-): Boolean {
-    val normalizedMessage = errorMessage?.lowercase().orEmpty()
-    if (!normalizedMessage.contains("http 404")) {
-        return false
-    }
-    if (!normalizedMessage.contains("/artifact-projects/")) {
-        return false
-    }
-    return normalizedMessage.contains("/${projectId.lowercase()}.json")
 }
 
 @Composable
@@ -785,6 +782,7 @@ private fun InvalidArtifactMetadataScreen(
     }
 }
 
+@Composable
 private fun buildArtifactBadges(
     version: String,
     artifactType: PublishArtifactType,
@@ -799,9 +797,9 @@ private fun buildArtifactBadges(
         )
         supportedVersionLabel
             .takeIf { it.isNotBlank() && !it.equals("Any", ignoreCase = true) }
-            ?.let { add("适配 $it") }
+            ?.let { add(stringResource(R.string.artifact_detail_badge_supported_version, it)) }
         if (version.isNotBlank()) {
-            add("版本 ${normalizeDetailVersionBadge(version)}")
+            add(stringResource(R.string.artifact_detail_badge_version, normalizeDetailVersionBadge(version)))
         }
     }
 }
@@ -817,8 +815,11 @@ private fun buildArtifactBanner(
     return when (installState) {
         LocalArtifactInstallStateKind.NAME_CONFLICT ->
             UnifiedMarketDetailBanner(
-                title = "同名冲突",
-                message = "本地已经有同名但不属于当前项目簇的版本 `${node.runtimePackageId}`，需要先手动卸载。",
+                title = stringResource(R.string.artifact_detail_name_conflict_title),
+                message = stringResource(
+                    R.string.artifact_detail_name_conflict_message,
+                    node.runtimePackageId
+                ),
                 icon = Icons.Default.Warning,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -826,8 +827,11 @@ private fun buildArtifactBanner(
 
         LocalArtifactInstallStateKind.BUILT_IN_CONFLICT ->
             UnifiedMarketDetailBanner(
-                title = "内置包冲突",
-                message = "本地同名包 `${node.runtimePackageId}` 来自内置插件，不能直接覆盖。",
+                title = stringResource(R.string.artifact_detail_built_in_conflict_title),
+                message = stringResource(
+                    R.string.artifact_detail_built_in_conflict_message,
+                    node.runtimePackageId
+                ),
                 icon = Icons.Default.Warning,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -859,6 +863,110 @@ private fun normalizeDetailVersionBadge(value: String): String {
     return trimmed.removePrefix("v").removePrefix("V").ifBlank { trimmed }
 }
 
+private fun buildArtifactPreviewNode(
+    issue: GitHubIssue,
+    info: ArtifactIssueParser.ParsedArtifactInfo,
+    entryPoint: ArtifactDetailEntryPoint,
+    reviewState: MarketReviewState
+): ArtifactProjectNodeResponse? {
+    if (entryPoint != ArtifactDetailEntryPoint.MANAGE) {
+        return null
+    }
+    if (!issue.state.equals("open", ignoreCase = true)) {
+        return null
+    }
+    if (info.type == null || info.projectId.isBlank()) {
+        return null
+    }
+
+    return ArtifactProjectNodeResponse(
+        projectId = info.projectId,
+        type = info.type.wireValue,
+        projectDisplayName = info.projectDisplayName.ifBlank { info.title },
+        projectDescription = info.projectDescription.ifBlank { info.description },
+        runtimePackageId = info.runtimePackageId,
+        nodeId = info.nodeId.ifBlank { "preview-${issue.id}" },
+        rootNodeId = info.rootNodeId.ifBlank { info.nodeId.ifBlank { "preview-${issue.id}" } },
+        parentNodeIds = info.parentNodeIds,
+        publisherLogin = info.publisherLogin.ifBlank { issue.user.login },
+        releaseTag = info.releaseTag,
+        assetName = info.assetName,
+        downloadUrl = info.downloadUrl,
+        sha256 = info.sha256,
+        version = info.version,
+        displayName = info.title,
+        description = info.description,
+        sourceFileName = info.sourceFileName,
+        minSupportedAppVersion = info.minSupportedAppVersion,
+        maxSupportedAppVersion = info.maxSupportedAppVersion,
+        publishedAt = issue.created_at,
+        state =
+            when (reviewState) {
+                MarketReviewState.REJECTED -> "closed"
+                else -> issue.state
+            },
+        issue = issue
+    )
+}
+
+private fun formatPreviewSupportedVersionLabel(
+    info: ArtifactIssueParser.ParsedArtifactInfo
+): String {
+    val min = info.minSupportedAppVersion?.trim().orEmpty()
+    val max = info.maxSupportedAppVersion?.trim().orEmpty()
+    return when {
+        min.isBlank() && max.isBlank() -> "Any"
+        min.isNotBlank() && max.isNotBlank() -> "$min - $max"
+        min.isNotBlank() -> "$min+"
+        else -> "<= $max"
+    }
+}
+
+@Composable
+private fun buildArtifactPreviewBanner(
+    isPreviewMode: Boolean,
+    reviewState: MarketReviewState,
+    reasons: List<com.ai.assistance.operit.ui.features.packages.market.MarketReviewReason>
+): UnifiedMarketDetailBanner? {
+    if (!isPreviewMode) {
+        return null
+    }
+
+    return UnifiedMarketDetailBanner(
+        title = stringResource(R.string.market_detail_preview_title),
+        message = buildArtifactPreviewBannerMessage(reviewState, reasons),
+        icon = Icons.Default.Warning,
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    )
+}
+
+@Composable
+private fun buildArtifactPreviewBannerMessage(
+    reviewState: MarketReviewState,
+    reasons: List<com.ai.assistance.operit.ui.features.packages.market.MarketReviewReason>
+): String {
+    val baseMessage =
+        when (reviewState) {
+            MarketReviewState.PENDING -> stringResource(R.string.market_detail_preview_pending_message)
+            MarketReviewState.APPROVED -> stringResource(R.string.market_detail_preview_approved_message)
+            MarketReviewState.CHANGES_REQUESTED -> stringResource(R.string.market_detail_preview_changes_requested_message)
+            MarketReviewState.REJECTED -> stringResource(R.string.market_detail_preview_rejected_message)
+        }
+    if (reasons.isEmpty() ||
+        (reviewState != MarketReviewState.CHANGES_REQUESTED && reviewState != MarketReviewState.REJECTED)
+    ) {
+        return baseMessage
+    }
+
+    val reasonLabels = mutableListOf<String>()
+    for (reason in reasons) {
+        reasonLabels += stringResource(reason.labelResId())
+    }
+    val reasonText = reasonLabels.joinToString(separator = " / ")
+    return "$baseMessage\n${stringResource(R.string.market_review_reasons_label)}：$reasonText"
+}
+
 private data class ArtifactPrimaryActionUi(
     val label: String,
     val enabled: Boolean,
@@ -872,18 +980,23 @@ private fun rememberArtifactPrimaryActionUi(
     installState: LocalArtifactInstallStateKind,
     isInstalling: Boolean,
     isRefreshingInstalledArtifacts: Boolean,
-    artifactType: PublishArtifactType
+    artifactType: PublishArtifactType,
+    isPreviewMode: Boolean
 ): ArtifactPrimaryActionUi {
     val isBusy = isInstalling || isRefreshingInstalledArtifacts
     val label =
         when {
-            isRefreshingInstalledArtifacts && !isInstalling -> "检查安装中"
+            isPreviewMode -> stringResource(R.string.market_detail_preview_action_label)
+            isRefreshingInstalledArtifacts && !isInstalling -> stringResource(R.string.artifact_detail_checking_installation)
             isInstalling -> stringResource(R.string.downloading)
             installState == LocalArtifactInstallStateKind.EXACT_INSTALLED ->
                 stringResource(R.string.installed)
-            installState == LocalArtifactInstallStateKind.SAME_PROJECT_VARIANT_INSTALLED -> "切换到此版本"
-            installState == LocalArtifactInstallStateKind.NAME_CONFLICT -> "同名冲突"
-            installState == LocalArtifactInstallStateKind.BUILT_IN_CONFLICT -> "内置包冲突"
+            installState == LocalArtifactInstallStateKind.SAME_PROJECT_VARIANT_INSTALLED ->
+                stringResource(R.string.artifact_detail_switch_to_this_version)
+            installState == LocalArtifactInstallStateKind.NAME_CONFLICT ->
+                stringResource(R.string.artifact_detail_name_conflict_title)
+            installState == LocalArtifactInstallStateKind.BUILT_IN_CONFLICT ->
+                stringResource(R.string.artifact_detail_built_in_conflict_title)
             artifactType == PublishArtifactType.SCRIPT -> stringResource(R.string.download_script)
             else -> stringResource(R.string.download_package)
         }
@@ -891,7 +1004,8 @@ private fun rememberArtifactPrimaryActionUi(
     return ArtifactPrimaryActionUi(
         label = label,
         enabled =
-            issueState == "open" &&
+            !isPreviewMode &&
+                issueState == "open" &&
                 !isBusy &&
                 installState !in
                     setOf(
@@ -902,6 +1016,7 @@ private fun rememberArtifactPrimaryActionUi(
         isLoading = isBusy,
         icon =
             when {
+                isPreviewMode -> Icons.Default.Warning
                 isBusy -> null
                 installState == LocalArtifactInstallStateKind.EXACT_INSTALLED -> Icons.Default.Check
                 installState == LocalArtifactInstallStateKind.SAME_PROJECT_VARIANT_INSTALLED -> Icons.Default.Update

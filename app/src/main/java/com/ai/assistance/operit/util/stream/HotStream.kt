@@ -320,7 +320,6 @@ fun <T> Stream<T>.share(
                             // 当上游流完成或被取消时，我们不再需要这个共享流。
                             // 但由于SharedFlow本身不会"关闭"，依赖协程的结构化并发来清理是最好的方式。
                             // 此处的finally确保了协程在任何情况下（完成、取消、异常）都能结束。
-                            StreamLogger.d("Stream.share", "上游流收集完成或取消，共享流协程结束。")
                             sharedStream.close() // 关闭流以允许收集器完成
                             onComplete()
                         }
@@ -339,7 +338,6 @@ fun <T> Stream<T>.share(
                                                 sharedStream.emit(emittedValue)
                                             }
                                         } finally {
-                                            StreamLogger.d("Stream.share", "上游流(LAZILY)收集完成或取消。")
                                             sharedStream.close() // 关闭流以允许收集器完成
                                             onComplete()
                                         }
@@ -348,7 +346,6 @@ fun <T> Stream<T>.share(
                             // 当没有订阅者时，取消上游流的收集
                             upstreamJob?.cancel()
                             upstreamJob = null
-                            StreamLogger.d("Stream.share", "没有订阅者，已取消上游流(LAZILY)的收集。")
                         }
                     }
                 } else {

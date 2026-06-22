@@ -33,6 +33,7 @@ fun MarkdownTextComposable(
                 content = text,
                 modifier = modifier,
                 textColor = textColor,
+                fontSize = fontSize,
                 enableDialogs = enableDialogs,
                 onLinkClick = { url ->
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))

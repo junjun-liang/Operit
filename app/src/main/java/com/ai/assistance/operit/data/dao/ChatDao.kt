@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ChatDao {
     /** 获取所有聊天，按显示顺序排列 */
-    @Query("SELECT * FROM chats ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats ORDER BY pinned DESC, displayOrder ASC")
     fun getAllChats(): Flow<List<ChatEntity>>
 
     /** 获取聊天总数 */
@@ -22,7 +22,7 @@ interface ChatDao {
     suspend fun getTotalChatCount(): Int
 
     /** 获取所有聊天（挂起函数版本） */
-    @Query("SELECT * FROM chats ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats ORDER BY pinned DESC, displayOrder ASC")
     suspend fun getAllChatsDirectly(): List<ChatEntity>
 
     /** 根据ID获取单个聊天 */
@@ -95,6 +95,10 @@ interface ChatDao {
     @Query("UPDATE chats SET locked = :locked, updatedAt = :timestamp WHERE id = :chatId")
     suspend fun updateChatLocked(chatId: String, locked: Boolean, timestamp: Long = System.currentTimeMillis())
 
+    /** 更新聊天置顶状态 */
+    @Query("UPDATE chats SET pinned = :pinned, updatedAt = :timestamp WHERE id = :chatId")
+    suspend fun updateChatPinned(chatId: String, pinned: Boolean, timestamp: Long = System.currentTimeMillis())
+
     /** 更新单个聊天的顺序和分组 */
     @Query("UPDATE chats SET displayOrder = :displayOrder, `group` = :group, updatedAt = :timestamp WHERE id = :chatId")
     suspend fun updateChatOrderAndGroup(chatId: String, displayOrder: Long, group: String?, timestamp: Long = System.currentTimeMillis())
@@ -136,31 +140,31 @@ interface ChatDao {
     suspend fun removeGroupFromLockedChatsForCharacter(groupName: String, characterCardName: String, timestamp: Long = System.currentTimeMillis())
 
     /** 根据parentChatId获取所有分支对话 */
-    @Query("SELECT * FROM chats WHERE parentChatId = :parentChatId ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE parentChatId = :parentChatId ORDER BY pinned DESC, displayOrder ASC")
     suspend fun getBranchesByParentId(parentChatId: String): List<ChatEntity>
 
     /** 根据parentChatId获取所有分支对话（Flow版本） */
-    @Query("SELECT * FROM chats WHERE parentChatId = :parentChatId ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE parentChatId = :parentChatId ORDER BY pinned DESC, displayOrder ASC")
     fun getBranchesByParentIdFlow(parentChatId: String): Flow<List<ChatEntity>>
 
     /** 获取所有没有父对话的对话（即主对话） */
-    @Query("SELECT * FROM chats WHERE parentChatId IS NULL ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE parentChatId IS NULL ORDER BY pinned DESC, displayOrder ASC")
     suspend fun getMainChats(): List<ChatEntity>
 
     /** 获取所有没有父对话的对话（Flow版本） */
-    @Query("SELECT * FROM chats WHERE parentChatId IS NULL ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE parentChatId IS NULL ORDER BY pinned DESC, displayOrder ASC")
     fun getMainChatsFlow(): Flow<List<ChatEntity>>
 
     /** 根据角色卡名称过滤聊天（非默认角色卡：只显示该角色卡名称的对话） */
-    @Query("SELECT * FROM chats WHERE characterCardName = :characterCardName AND characterGroupId IS NULL ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE characterCardName = :characterCardName AND characterGroupId IS NULL ORDER BY pinned DESC, displayOrder ASC")
     fun getChatsByCharacterCard(characterCardName: String): Flow<List<ChatEntity>>
 
     /** 根据群组ID过滤聊天 */
-    @Query("SELECT * FROM chats WHERE characterGroupId = :characterGroupId ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE characterGroupId = :characterGroupId ORDER BY pinned DESC, displayOrder ASC")
     fun getChatsByCharacterGroupId(characterGroupId: String): Flow<List<ChatEntity>>
 
     /** 根据角色卡名称过滤聊天（默认角色卡：显示该角色卡名称的对话 + 所有characterCardName为null的对话） */
-    @Query("SELECT * FROM chats WHERE characterCardName = :characterCardName OR (characterCardName IS NULL AND characterGroupId IS NULL) ORDER BY displayOrder ASC")
+    @Query("SELECT * FROM chats WHERE characterCardName = :characterCardName OR (characterCardName IS NULL AND characterGroupId IS NULL) ORDER BY pinned DESC, displayOrder ASC")
     fun getChatsByCharacterCardOrNull(characterCardName: String): Flow<List<ChatEntity>>
 
     /** 批量清理绑定特定角色卡名称的对话（将characterCardName设为null） */

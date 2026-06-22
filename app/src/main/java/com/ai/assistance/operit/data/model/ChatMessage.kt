@@ -22,6 +22,7 @@ data class ChatMessage(
         val sentAt: Long = 0L, // 本轮请求发送时间（时间戳）
         val outputDurationMs: Long = 0L, // 本轮输出耗时
         val waitDurationMs: Long = 0L, // 本轮等待首包耗时
+        val completedAt: Long = 0L, // 本轮消息完成时间（时间戳）
         val displayMode: ChatMessageDisplayMode = ChatMessageDisplayMode.NORMAL,
         val isFavorite: Boolean = false,
         @Transient
@@ -37,22 +38,23 @@ data class ChatMessage(
     constructor(
             parcel: Parcel
     ) : this(
-        parcel.readString() ?: "", 
-        parcel.readString() ?: "", 
-        parcel.readLong(),
-        parcel.readString() ?: "",
-        parcel.readInt(),
-        parcel.readInt(),
-        parcel.readString() ?: "",
-        parcel.readString() ?: "",
-        parcel.readInt(),
-        parcel.readInt(),
-        parcel.readInt(),
-        parcel.readLong(),
-        parcel.readLong(),
-        parcel.readLong(),
-        readDisplayModeFromParcel(parcel),
-        parcel.readInt() != 0,
+        sender = parcel.readString() ?: "",
+        content = parcel.readString() ?: "",
+        timestamp = parcel.readLong(),
+        roleName = parcel.readString() ?: "",
+        selectedVariantIndex = parcel.readInt(),
+        variantCount = parcel.readInt(),
+        provider = parcel.readString() ?: "",
+        modelName = parcel.readString() ?: "",
+        inputTokens = parcel.readInt(),
+        outputTokens = parcel.readInt(),
+        cachedInputTokens = parcel.readInt(),
+        sentAt = parcel.readLong(),
+        outputDurationMs = parcel.readLong(),
+        waitDurationMs = parcel.readLong(),
+        displayMode = readDisplayModeFromParcel(parcel),
+        isFavorite = readBooleanFromParcel(parcel),
+        completedAt = if (parcel.dataAvail() > 0) parcel.readLong() else 0L,
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -72,6 +74,7 @@ data class ChatMessage(
         parcel.writeLong(waitDurationMs)
         parcel.writeString(displayMode.name)
         parcel.writeInt(if (isFavorite) 1 else 0)
+        parcel.writeLong(completedAt)
         // 不需要序列化contentStream，因为它是暂时性的
     }
 
@@ -81,11 +84,18 @@ data class ChatMessage(
 
     companion object CREATOR : Parcelable.Creator<ChatMessage> {
         private fun readDisplayModeFromParcel(parcel: Parcel): ChatMessageDisplayMode {
+            if (parcel.dataAvail() <= 0) {
+                return ChatMessageDisplayMode.NORMAL
+            }
             return runCatching {
                 ChatMessageDisplayMode.valueOf(
                     parcel.readString() ?: ChatMessageDisplayMode.NORMAL.name
                 )
             }.getOrDefault(ChatMessageDisplayMode.NORMAL)
+        }
+
+        private fun readBooleanFromParcel(parcel: Parcel): Boolean {
+            return parcel.dataAvail() > 0 && parcel.readInt() != 0
         }
 
         override fun createFromParcel(parcel: Parcel): ChatMessage {

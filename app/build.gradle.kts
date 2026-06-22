@@ -55,8 +55,8 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 41
-        versionName = "1.10.1+12"
+        versionCode = 44
+        versionName = "1.11.0+5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -99,6 +99,15 @@ android {
                 signingConfig = releaseSigningConfig
             }
         }
+        create("clone") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".clone"
+            if (releaseSigningConfig != null) {
+                signingConfig = releaseSigningConfig
+            }
+            matchingFallbacks += listOf("debug")
+            resValue("string", "app_name", "Operit Clone")
+        }
         create("nightly") {
             isMinifyEnabled = false
             isShrinkResources = false
@@ -118,6 +127,12 @@ android {
             outputs.all {
                 val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
                 output.outputFileName = "app-nightly.apk"
+            }
+        }
+        if (buildType.name == "clone") {
+            outputs.all {
+                val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+                output.outputFileName = "app-clone.apk"
             }
         }
     }

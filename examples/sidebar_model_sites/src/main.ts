@@ -38,7 +38,7 @@ export function registerToolPkg(): boolean {
       zh: "网站聚合",
       en: "Model Sites",
     },
-    icon: "Language",
+    icon: Icons.Language,
     order: 136,
   });
 

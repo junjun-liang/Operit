@@ -486,6 +486,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(trigger, startChat, createChat, extractMessage, sendMessage, stopChat, sendBroadcast, closeAllDisplays),
@@ -562,6 +563,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(trigger, startChat, createChat, sendMessage, stopChat, closeAllDisplays),
@@ -644,6 +646,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(
@@ -755,6 +758,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(
@@ -887,6 +891,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(
@@ -949,6 +954,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(trigger, mainAction, onSuccess, onError),
@@ -985,6 +991,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         )
 
         return Workflow(
+            id = UUID.randomUUID().toString(),
             name = name,
             description = description,
             nodes = listOf(trigger, startChat),
@@ -1043,6 +1050,7 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
             error = null
             
             val workflow = Workflow(
+                id = UUID.randomUUID().toString(),
                 name = name,
                 description = description
             )
@@ -1073,32 +1081,22 @@ class WorkflowViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun setWorkflowEnabled(workflowId: String, enabled: Boolean) {
+    fun setWorkflowEnabled(workflowId: String, enabled: Boolean, onSuccess: () -> Unit = {}) {
         val previousWorkflow = workflows.find { it.id == workflowId } ?: return
-        if (previousWorkflow.enabled == enabled) return
+        if (previousWorkflow.enabled == enabled) {
+            onSuccess()
+            return
+        }
 
         replaceWorkflowInState(previousWorkflow.copy(enabled = enabled))
 
         viewModelScope.launch {
             error = null
 
-            repository.getWorkflowById(workflowId).fold(
-                onSuccess = { storedWorkflow ->
-                    if (storedWorkflow == null) {
-                        replaceWorkflowInState(previousWorkflow)
-                        error = app.getString(R.string.workflow_not_found)
-                        return@fold
-                    }
-
-                    repository.updateWorkflow(storedWorkflow.copy(enabled = enabled)).fold(
-                        onSuccess = { savedWorkflow ->
-                            replaceWorkflowInState(savedWorkflow)
-                        },
-                        onFailure = {
-                            replaceWorkflowInState(previousWorkflow)
-                            error = it.message ?: app.getString(R.string.workflow_error_update_failed)
-                        }
-                    )
+            repository.setWorkflowEnabled(workflowId, enabled).fold(
+                onSuccess = { savedWorkflow ->
+                    replaceWorkflowInState(savedWorkflow)
+                    onSuccess()
                 },
                 onFailure = {
                     replaceWorkflowInState(previousWorkflow)

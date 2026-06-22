@@ -98,6 +98,7 @@ export interface WebChatMessagesPage {
 }
 
 export interface WebChatMessageLocatorPreview {
+  message_index: number | null;
   timestamp: number;
   sender: ChatSender | 'think' | string;
   preview_content: string;
@@ -193,6 +194,9 @@ export interface WebDisplayPreferences {
   show_role_name: boolean;
   show_model_name: boolean;
   show_model_provider: boolean;
+  show_message_token_stats: boolean;
+  show_message_timing_stats: boolean;
+  show_message_timestamp: boolean;
   tool_collapse_mode: string;
   global_user_name?: string | null;
 }

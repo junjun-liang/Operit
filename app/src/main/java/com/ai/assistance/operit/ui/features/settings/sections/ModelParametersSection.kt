@@ -818,7 +818,12 @@ private fun AddCustomParameterDialog(
         onDismissRequest = onDismiss,
         title = { Text(dialogTitle) },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // 参数名称 - 总是显示
                 OutlinedTextField(
                     value = name,

@@ -10,8 +10,9 @@ import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 internal class PackageManagerToolPkgFacade(
     private val packageManager: PackageManager
@@ -409,14 +410,18 @@ internal class PackageManagerToolPkgFacade(
                     ?: throw IllegalStateException(
                         "Workflow template resource is unavailable: ${template.resourceKey}"
                     )
-            val decoded =
-                workflowTemplateJson.decodeFromString<Workflow>(
-                    bytes.toString(StandardCharsets.UTF_8)
+            val templateWorkflowId = UUID.randomUUID().toString()
+            val templateElement =
+                JsonObject(
+                    (workflowTemplateJson.parseToJsonElement(bytes.toString(StandardCharsets.UTF_8)) as JsonObject) +
+                        ("id" to JsonPrimitive(templateWorkflowId))
                 )
+            val decoded =
+                workflowTemplateJson.decodeFromJsonElement(Workflow.serializer(), templateElement)
             val now = System.currentTimeMillis()
             val importedWorkflow =
                 decoded.copy(
-                    id = UUID.randomUUID().toString(),
+                    id = templateWorkflowId,
                     createdAt = now,
                     updatedAt = now,
                     lastExecutionTime = null,
@@ -871,7 +876,10 @@ internal class PackageManagerToolPkgFacade(
         pluginId: String? = null,
         inlineFunctionSource: String? = null,
         eventPayload: Map<String, Any?> = emptyMap(),
-        onIntermediateResult: ((Any?) -> Unit)? = null
+        onIntermediateResult: ((Any?) -> Unit)? = null,
+        executionContextKey: String? = null,
+        runtimeKind: String? = null,
+        dispatchIntermediateOnMain: Boolean = true
     ): Result<Any?> {
         val normalizedPluginId = pluginId?.trim().orEmpty().ifBlank { null }
         val resolvedEventName = eventName?.trim().orEmpty().ifBlank { event }
@@ -932,15 +940,28 @@ internal class PackageManagerToolPkgFacade(
                 params["__operit_inline_function_name"] = functionName
                 params["__operit_inline_function_source"] = functionSource
             }
+            executionContextKey
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { contextKey ->
+                    params["__operit_execution_context_key"] = contextKey
+                }
+            runtimeKind
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { kind ->
+                    params["__operit_toolpkg_runtime_kind"] = kind
+                }
 
             val getExecutionEngineStartTime = if (shouldLogTiming) messageTimingNow() else 0L
-            val executionContextKey = resolveToolPkgExecutionContextKey(runtime.packageName, params)
-            val executionEngine = packageManager.getToolPkgExecutionEngine(executionContextKey)
+            val resolvedExecutionContextKey = resolveToolPkgExecutionContextKey(runtime.packageName, params)
+            val executionEngine = packageManager.getToolPkgExecutionEngine(resolvedExecutionContextKey)
             if (shouldLogTiming) {
                 logMessageTiming(
                     stage = "toolpkg.runMainHook.getExecutionEngine",
                     startTimeMs = getExecutionEngineStartTime,
-                    details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, contextKey=$executionContextKey"
+                    details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, contextKey=$resolvedExecutionContextKey"
                 )
             }
 
@@ -949,7 +970,8 @@ internal class PackageManagerToolPkgFacade(
                 script = script,
                 functionName = functionName,
                 params = params,
-                onIntermediateResult = onIntermediateResult
+                onIntermediateResult = onIntermediateResult,
+                dispatchIntermediateOnMain = dispatchIntermediateOnMain
             )
             if (shouldLogTiming) {
                 logMessageTiming(

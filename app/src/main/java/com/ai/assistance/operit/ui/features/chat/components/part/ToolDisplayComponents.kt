@@ -73,12 +73,7 @@ fun CompactToolDisplay(
         )
     }
 
-    val summary = remember(displayParams.length) {
-        val firstParamRegex = "<param.*?>([^<]*)<\\/param>".toRegex()
-        val match = firstParamRegex.find(displayParams)
-        match?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: displayParams.replace("\n", " ").trim()
-    }
+    val summary = remember(displayParams) { buildParamsHeadPreview(displayParams) }
 
     CanvasToolSummaryRow(
         toolName = displayToolName,

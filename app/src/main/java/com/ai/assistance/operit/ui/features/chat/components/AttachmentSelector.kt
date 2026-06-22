@@ -36,7 +36,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
@@ -44,13 +43,20 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ScreenshotMonitor
-import androidx.compose.material.icons.filled.VideoCameraBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,11 +75,9 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.tools.AIToolHandler
-import com.ai.assistance.operit.services.core.AttachmentDelegate
-import com.ai.assistance.operit.util.AppLogger
-import kotlinx.coroutines.Dispatchers
+import com.ai.assistance.operit.core.tools.packTool.PackageManager as ToolPackageManager
+import com.ai.assistance.operit.data.skill.SkillRepository
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -89,6 +93,7 @@ fun AttachmentSelectorPanel(
         onAttachNotifications: () -> Unit = {},
         onAttachLocation: () -> Unit = {},
         onAttachMemory: () -> Unit = {},
+        onAttachPackage: (String) -> Unit = {},
         onTakePhoto: (Uri) -> Unit,
         userQuery: String = "",
         onDismiss: () -> Unit
@@ -100,10 +105,7 @@ fun AttachmentSelectorPanel(
         onDismiss = onDismiss,
     )
 
-    // 获取AttachmentDelegate实例
-    val attachmentManager = remember {
-        AttachmentDelegate(context, AIToolHandler.getInstance(context))
-    }
+    var showPackageDialog by remember { mutableStateOf(false) }
 
     // 文件/图片选择器启动器
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -112,7 +114,7 @@ fun AttachmentSelectorPanel(
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
-                    getFilePathFromUri(context, uri)?.let { path ->
+                    getAttachmentSource(uri)?.let { path ->
                         onAttachImage(path)
                     }
                 }
@@ -127,7 +129,7 @@ fun AttachmentSelectorPanel(
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
-                    getFilePathFromUri(context, uri)?.let { path ->
+                    getAttachmentSource(uri)?.let { path ->
                         onAttachFile(path)
                     }
                 }
@@ -191,11 +193,6 @@ fun AttachmentSelectorPanel(
                                         }
                                 ),
                                 AttachmentPanelItem(
-                                        icon = Icons.Default.AudioFile,
-                                        label = context.getString(R.string.attachment_audio),
-                                        onClick = { imagePickerLauncher.launch("audio/*") }
-                                ),
-                                AttachmentPanelItem(
                                         icon = Icons.Default.Description,
                                         label = context.getString(R.string.attachment_file),
                                         onClick = { filePickerLauncher.launch("*/*") }
@@ -223,6 +220,11 @@ fun AttachmentSelectorPanel(
                                             onAttachLocation()
                                             onDismiss()
                                         }
+                                ),
+                                AttachmentPanelItem(
+                                        icon = Icons.Default.AutoAwesome,
+                                        label = context.getString(R.string.attachment_package),
+                                        onClick = { showPackageDialog = true }
                                 )
                         )
 
@@ -309,9 +311,18 @@ fun AttachmentSelectorPanel(
             }
         }
     }
-}
 
-/** Agent 模式用的附件弹窗（上方悬浮样式，功能与经典模式 8 项保持一致） */
+    // 包选择对话框
+    PackageSelectorDialog(
+        visible = showPackageDialog,
+        onDismiss = { showPackageDialog = false },
+        onPackageSelected = { packageName ->
+            onAttachPackage(packageName)
+            showPackageDialog = false
+            onDismiss()
+        }
+    )
+}
 @Composable
 fun AttachmentSelectorPopupPanel(
         visible: Boolean,
@@ -322,6 +333,7 @@ fun AttachmentSelectorPopupPanel(
         onAttachNotifications: () -> Unit = {},
         onAttachLocation: () -> Unit = {},
         onAttachMemory: () -> Unit = {},
+        onAttachPackage: (String) -> Unit = {},
         onTakePhoto: (Uri) -> Unit,
         onDismiss: () -> Unit
 ) {
@@ -334,13 +346,15 @@ fun AttachmentSelectorPopupPanel(
             onDismiss = onDismiss,
     )
 
+    var showPackageDialog by remember { mutableStateOf(false) }
+
     val imagePickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
-                    getFilePathFromUri(context, uri)?.let { path ->
+                    getAttachmentSource(uri)?.let { path ->
                         onAttachImage(path)
                     }
                 }
@@ -355,7 +369,7 @@ fun AttachmentSelectorPopupPanel(
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
-                    getFilePathFromUri(context, uri)?.let { path ->
+                    getAttachmentSource(uri)?.let { path ->
                         onAttachFile(path)
                     }
                 }
@@ -385,11 +399,6 @@ fun AttachmentSelectorPopupPanel(
                             }
                     ),
                     AttachmentPanelItem(
-                            icon = Icons.Default.AudioFile,
-                            label = context.getString(R.string.attachment_audio),
-                            onClick = { imagePickerLauncher.launch("audio/*") }
-                    ),
-                    AttachmentPanelItem(
                             icon = Icons.Default.Description,
                             label = context.getString(R.string.attachment_file),
                             onClick = { filePickerLauncher.launch("*/*") }
@@ -417,6 +426,11 @@ fun AttachmentSelectorPopupPanel(
                                 onAttachLocation()
                                 onDismiss()
                             }
+                    ),
+                    AttachmentPanelItem(
+                            icon = Icons.Default.AutoAwesome,
+                            label = context.getString(R.string.attachment_package),
+                            onClick = { showPackageDialog = true }
                     )
             )
 
@@ -487,12 +501,36 @@ fun AttachmentSelectorPopupPanel(
             }
         }
     }
+
+    // 包选择对话框
+    PackageSelectorDialog(
+        visible = showPackageDialog,
+        onDismiss = { showPackageDialog = false },
+        onPackageSelected = { packageName ->
+            onAttachPackage(packageName)
+            showPackageDialog = false
+            onDismiss()
+        }
+    )
 }
 
 private data class AttachmentPanelItem(
         val icon: ImageVector,
         val label: String,
         val onClick: () -> Unit
+)
+
+private enum class AttachmentPackageKind {
+    PACKAGE,
+    SKILL,
+    MCP
+}
+
+private data class AttachmentPackageOption(
+        val packageName: String,
+        val title: String,
+        val description: String,
+        val kind: AttachmentPackageKind
 )
 
 @Composable
@@ -557,41 +595,12 @@ private fun createTempCameraUri(context: Context): Uri {
     return FileProvider.getUriForFile(context, authority, tmpFile)
 }
 
-// 添加Uri转换为文件路径的工具函数
-private suspend fun getFilePathFromUri(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
-    // 使用ContentResolver获取真实文件路径
-    val contentResolver = context.contentResolver
-
-    // 文件URI直接返回路径
-    if (uri.scheme == "file") {
-        return@withContext uri.path
+private fun getAttachmentSource(uri: Uri): String? {
+    return when (uri.scheme) {
+        "file" -> uri.path
+        "content" -> uri.toString()
+        else -> null
     }
-
-    // 处理content URI
-    if (uri.scheme == "content") {
-        try {
-            // 尝试通过DocumentFile获取路径
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    // 尝试获取_data列（真实路径）
-                    val dataIndex = it.getColumnIndex("_data")
-                    if (dataIndex != -1) {
-                        return@withContext it.getString(dataIndex)
-                    }
-                }
-            }
-
-            // 如果使用_data列无法获取路径，则直接返回URI的字符串表示
-            // 这样应用可以通过ContentResolver直接使用这个URI访问文件
-            AppLogger.d("AttachmentSelector", "使用URI字符串: ${uri.toString()}")
-            return@withContext uri.toString()
-        } catch (e: Exception) {
-            AppLogger.e("AttachmentSelector", "获取文件路径错误", e)
-        }
-    }
-
-    return@withContext null
 }
 
 /** 简约的附件选项组件 */
@@ -640,4 +649,219 @@ private fun AttachmentOption(icon: ImageVector, label: String, onClick: () -> Un
 @Composable
 private fun AttachmentOptionPlaceholder() {
     Spacer(modifier = Modifier.width(70.dp).padding(horizontal = 8.dp, vertical = 8.dp))
+}
+
+/** 包选择对话框 */
+@Composable
+fun PackageSelectorDialog(
+        visible: Boolean,
+        onDismiss: () -> Unit,
+        onPackageSelected: (String) -> Unit
+) {
+    if (!visible) return
+
+    val context = LocalContext.current
+    val toolHandler = remember { AIToolHandler.getInstance(context.applicationContext) }
+    val packageManager = remember {
+        ToolPackageManager.getInstance(context.applicationContext, toolHandler)
+    }
+    val skillRepository = remember { SkillRepository.getInstance(context.applicationContext) }
+    var packageOptions by remember { mutableStateOf<List<AttachmentPackageOption>>(emptyList()) }
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredPackageOptions =
+            remember(packageOptions, searchQuery) {
+                val query = searchQuery.trim()
+                if (query.isEmpty()) {
+                    packageOptions
+                } else {
+                    packageOptions.filter { option ->
+                        option.title.contains(query, ignoreCase = true) ||
+                            option.packageName.contains(query, ignoreCase = true) ||
+                            option.description.contains(query, ignoreCase = true)
+                    }
+                }
+            }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            searchQuery = ""
+            packageOptions =
+                buildAttachmentPackageOptions(
+                    context = context.applicationContext,
+                    packageManager = packageManager,
+                    skillRepository = skillRepository
+                )
+        }
+    }
+
+    AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Text(
+                        text = context.getString(R.string.attachment_package_select_title),
+                        style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                if (packageOptions.isEmpty()) {
+                    Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                                text = context.getString(R.string.attachment_package_empty),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Column(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState())
+                    ) {
+                        OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                placeholder = {
+                                    Text(context.getString(R.string.attachment_package_search_placeholder))
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = context.getString(R.string.search)
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(
+                                                    imageVector = Icons.Default.Clear,
+                                                    contentDescription = context.getString(R.string.clear_search)
+                                            )
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        )
+
+                        if (filteredPackageOptions.isEmpty()) {
+                            Box(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                    contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                        text = context.getString(R.string.attachment_package_search_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            filteredPackageOptions.forEach { option ->
+                                Surface(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Color.Transparent,
+                                        onClick = { onPackageSelected(option.packageName) }
+                                ) {
+                                    Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                                imageVector = Icons.Default.AutoAwesome,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                    text = option.title,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                    text = buildAttachmentPackageSubtitle(option),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(context.getString(R.string.cancel))
+                }
+            }
+    )
+}
+
+private fun buildAttachmentPackageOptions(
+        context: Context,
+        packageManager: ToolPackageManager,
+        skillRepository: SkillRepository
+): List<AttachmentPackageOption> {
+    val options = linkedMapOf<String, AttachmentPackageOption>()
+
+    packageManager.getAvailablePackages().toSortedMap().forEach { (packageName, toolPackage) ->
+        if (packageManager.isToolPkgContainer(packageName)) {
+            return@forEach
+        }
+        options.putIfAbsent(
+                packageName,
+                AttachmentPackageOption(
+                        packageName = packageName,
+                        title = toolPackage.displayName.resolve(context).ifBlank { packageName },
+                        description = toolPackage.description.resolve(context),
+                        kind = AttachmentPackageKind.PACKAGE
+                )
+        )
+    }
+
+    skillRepository.getAiVisibleSkillPackages().toSortedMap().forEach { (skillName, skillPackage) ->
+        options.putIfAbsent(
+                skillName,
+                AttachmentPackageOption(
+                        packageName = skillName,
+                        title = skillName,
+                        description = skillPackage.description,
+                        kind = AttachmentPackageKind.SKILL
+                )
+        )
+    }
+
+    packageManager.getAvailableServerPackages().toSortedMap().forEach { (serverName, serverConfig) ->
+        options.putIfAbsent(
+                serverName,
+                AttachmentPackageOption(
+                        packageName = serverName,
+                        title = serverConfig.name.ifBlank { serverName },
+                        description = serverConfig.description,
+                        kind = AttachmentPackageKind.MCP
+                )
+        )
+    }
+
+    return options.values.toList()
+}
+
+private fun buildAttachmentPackageSubtitle(option: AttachmentPackageOption): String {
+    val typeLabel =
+            when (option.kind) {
+                AttachmentPackageKind.PACKAGE -> "包"
+                AttachmentPackageKind.SKILL -> "技能"
+                AttachmentPackageKind.MCP -> "MCP"
+            }
+    return if (option.description.isBlank()) {
+        typeLabel
+    } else {
+        "$typeLabel · ${option.description}"
+    }
 }

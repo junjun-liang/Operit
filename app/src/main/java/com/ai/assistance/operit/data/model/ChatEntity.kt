@@ -23,7 +23,8 @@ data class ChatEntity(
         val parentChatId: String? = null,
         val characterCardName: String? = null,
         val characterGroupId: String? = null,
-        val locked: Boolean = false
+        val locked: Boolean = false,
+        val pinned: Boolean = false
 ) {
     /** 转换为ChatHistory对象（供UI层使用） */
     fun toChatHistory(messages: List<ChatMessage>): ChatHistory {
@@ -51,7 +52,8 @@ data class ChatEntity(
                 parentChatId = parentChatId,
                 characterCardName = characterCardName,
                 characterGroupId = characterGroupId,
-                locked = locked
+                locked = locked,
+                pinned = pinned
         )
     }
 
@@ -84,7 +86,8 @@ data class ChatEntity(
                     parentChatId = chatHistory.parentChatId,
                     characterCardName = chatHistory.characterCardName,
                     characterGroupId = chatHistory.characterGroupId,
-                    locked = chatHistory.locked
+                    locked = chatHistory.locked,
+                    pinned = chatHistory.pinned
             )
         }
     }

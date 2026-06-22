@@ -6,6 +6,7 @@ import com.ai.assistance.operit.util.stream.StreamCollector
 import com.ai.assistance.operit.util.stream.StreamGroup
 import com.ai.assistance.operit.util.stream.StreamLogger
 import com.ai.assistance.operit.util.stream.asStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.consumeAsFlow
@@ -185,6 +186,8 @@ private fun Stream<Char>.nativeMarkdownSplitBySession(
                             }
                         }
                         flushDelta()
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         StreamLogger.e(debugTag, "nativeMarkdownSplitBy failed: ${e.message}", e)
                         throw e
@@ -376,6 +379,8 @@ private fun Stream<String>.nativeMarkdownSplitBySessionString(
                             }
                         }
                         flushDelta()
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         StreamLogger.e(debugTag, "nativeMarkdownSplitBy failed: ${e.message}", e)
                         throw e

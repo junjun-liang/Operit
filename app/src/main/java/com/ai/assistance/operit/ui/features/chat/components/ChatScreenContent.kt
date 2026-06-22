@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,13 +42,21 @@ import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ActivePrompt
 
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
+import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatHistoryDisplayMode
 import com.ai.assistance.operit.ui.features.chat.components.style.bubble.BubbleImageStyleConfig
+import com.ai.assistance.operit.data.model.ModelConfigData
+import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
+import com.ai.assistance.operit.ui.components.CustomScaffold
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalFocusManager
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceBackupManager
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -273,8 +280,8 @@ fun ChatScreenContent(
                         onShowLatestDisplayWindow = {
                             actualViewModel.showLatestMessagesForCurrentChat()
                         },
-                        loadMessageLocatorEntries = { chatId ->
-                            actualViewModel.loadChatMessageLocatorPreviews(chatId)
+                        loadMessageLocatorEntries = { chatId, query ->
+                            actualViewModel.loadChatMessageLocatorPreviews(chatId, query)
                         },
                         onRevealMessageForLocator = { targetTimestamp ->
                             actualViewModel.revealMessageForCurrentChat(targetTimestamp)
@@ -390,8 +397,8 @@ fun ChatScreenContent(
                         onShowLatestDisplayWindow = {
                             actualViewModel.showLatestMessagesForCurrentChat()
                         },
-                        loadMessageLocatorEntries = { chatId ->
-                            actualViewModel.loadChatMessageLocatorPreviews(chatId)
+                        loadMessageLocatorEntries = { chatId, query ->
+                            actualViewModel.loadChatMessageLocatorPreviews(chatId, query)
                         },
                         onRevealMessageForLocator = { targetTimestamp ->
                             actualViewModel.revealMessageForCurrentChat(targetTimestamp)
@@ -518,6 +525,34 @@ fun ChatScreenContent(
                                         if (allSelectableSelected) R.string.clear_selection else R.string.select_all_messages
                                 ),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        FilledIconButton(
+                            onClick = {
+                                if (selectedMessageIndices.isNotEmpty()) {
+                                    val selectedMessages =
+                                        selectedMessageIndices
+                                            .mapNotNull { index -> chatHistory.getOrNull(index) }
+                                            .sortedBy { it.timestamp }
+                                    actualViewModel.enqueueSelectedMessagesForMemoryAutoSave(
+                                        selectedMessages
+                                    )
+                                }
+                            },
+                            enabled = selectedMessageIndices.isNotEmpty(),
+                            modifier = Modifier.size(32.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = stringResource(R.string.add_selected_to_memory),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -720,6 +755,65 @@ fun ChatScreenContent(
             )
         }
 
+        // 插入总结自定义规则对话框
+        val insertSummaryDialogVisible by actualViewModel.showInsertSummaryDialog.collectAsState()
+        val pendingMessage by actualViewModel.pendingInsertSummaryMessage.collectAsState()
+        if (insertSummaryDialogVisible && pendingMessage != null) {
+            val context = LocalContext.current
+            val functionalConfigManager = remember { FunctionalConfigManager(context) }
+            val modelConfigManager = remember { ModelConfigManager(context) }
+            var savedCustomRules by remember { mutableStateOf("") }
+            var customRulesInput by remember { mutableStateOf("") }
+
+            LaunchedEffect(Unit) {
+                functionalConfigManager.initializeIfNeeded()
+                modelConfigManager.initializeIfNeeded()
+                val functionMappings = functionalConfigManager.functionConfigMappingWithIndexFlow.first()
+                val chatMapping = functionMappings[com.ai.assistance.operit.data.model.FunctionType.CHAT] ?: com.ai.assistance.operit.data.preferences.FunctionConfigMapping()
+                if (chatMapping.configId.isNotBlank()) {
+                    modelConfigManager.getModelConfigFlow(chatMapping.configId).first().let { config ->
+                        savedCustomRules = config.summaryCustomRules
+                        customRulesInput = config.summaryCustomRules
+                    }
+                }
+            }
+
+            AlertDialog(
+                onDismissRequest = { actualViewModel.cancelInsertSummary() },
+                title = { Text(stringResource(R.string.settings_summary_custom_rules)) },
+                text = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.settings_summary_custom_rules_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = customRulesInput,
+                            onValueChange = { customRulesInput = it },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                            placeholder = { Text(stringResource(R.string.settings_summary_custom_rules_desc)) },
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            keyboardOptions = KeyboardOptions.Default
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        actualViewModel.confirmInsertSummary(customRulesInput)
+                    }) {
+                        Text(stringResource(android.R.string.ok))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { actualViewModel.cancelInsertSummary() }) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                }
+            )
+        }
+
         if (showSharePreviewDialog) {
             LaunchedEffect(
                 showSharePreviewDialog,
@@ -814,22 +908,6 @@ fun ChatScreenContent(
                 }
             )
         }
-
-        // Scroll to bottom button
-        ScrollToBottomButton(
-            scrollState = scrollState,
-            coroutineScope = coroutineScope,
-            autoScrollToBottom = autoScrollToBottom,
-            hasNewerDisplayHistory = hasNewerDisplayHistory,
-            onRequestLatestMessages = {
-                actualViewModel.showLatestMessagesForCurrentChat()
-            },
-            onAutoScrollToBottomChange = onAutoScrollToBottomChange,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = bottomInset + 16.dp)
-        )
-
 
         // 导出平台选择对话框
         if (showExportPlatformDialog) {

@@ -78,6 +78,8 @@ import com.ai.assistance.operit.data.model.ApiProviderType
 import com.ai.assistance.operit.data.model.ModelOption
 import com.ai.assistance.operit.ui.components.CustomScaffold
 import com.ai.assistance.operit.api.voice.SiliconFlowVoiceProvider
+import com.ai.assistance.operit.api.voice.MimoVoiceProvider
+import com.ai.assistance.operit.api.voice.DoubaoVoiceProvider
 import com.ai.assistance.operit.api.voice.OpenAIRealtimeVoiceProvider
 import com.ai.assistance.operit.api.voice.OpenAIVoiceProvider
 import com.ai.assistance.operit.api.voice.SimpleVoiceProvider
@@ -100,6 +102,7 @@ fun SpeechServicesSettingsScreen(
     // --- State for TTS Settings ---
     val ttsServiceType by prefs.ttsServiceTypeFlow.collectAsState(initial = VoiceServiceFactory.VoiceServiceType.SIMPLE_TTS)
     val httpConfig by prefs.ttsHttpConfigFlow.collectAsState(initial = SpeechServicesPreferences.DEFAULT_HTTP_TTS_PRESET)
+    val vitsConfig by prefs.ttsVitsPackageConfigFlow.collectAsState(initial = SpeechServicesPreferences.DEFAULT_VITS_TTS_PACKAGE_CONFIG)
     val ttsCleanerRegexs by prefs.ttsCleanerRegexsFlow.collectAsState(initial = emptyList())
     val ttsSpeechRate by prefs.ttsSpeechRateFlow.collectAsState(initial = SpeechServicesPreferences.DEFAULT_TTS_SPEECH_RATE)
     val ttsPitch by prefs.ttsPitchFlow.collectAsState(initial = SpeechServicesPreferences.DEFAULT_TTS_PITCH)
@@ -117,15 +120,18 @@ fun SpeechServicesSettingsScreen(
     var ttsResponsePipelineInput by remember(httpConfig) {
         mutableStateOf(HttpTtsResponsePipelineStep.encodeList(httpConfig.responsePipeline))
     }
+    var vitsPackagePathInput by remember(vitsConfig) { mutableStateOf(vitsConfig.packagePath) }
+    var vitsSpeakerIdInput by remember(vitsConfig) { mutableStateOf(vitsConfig.speakerId) }
+    var vitsOptionsInput by remember(vitsConfig) { mutableStateOf(Json.encodeToString(vitsConfig.options)) }
     var ttsSpeechRateInput by remember(ttsSpeechRate) { mutableStateOf(ttsSpeechRate) }
     var ttsPitchInput by remember(ttsPitch) { mutableStateOf(ttsPitch) }
     var ttsHeadersJsonError by remember { mutableStateOf<String?>(null) }
     var ttsResponsePipelineJsonError by remember { mutableStateOf<String?>(null) }
-    var onnxTtsHeadersJsonError by remember { mutableStateOf<String?>(null) }
+    var vitsOptionsJsonError by remember { mutableStateOf<String?>(null) }
     var httpMethodDropdownExpanded by remember { mutableStateOf(false) }
     val ttsCleanerRegexsState = remember { mutableStateListOf<String>() }
     val hasHttpTtsJsonError = ttsHeadersJsonError != null || ttsResponsePipelineJsonError != null
-    val hasOnnxTtsJsonError = onnxTtsHeadersJsonError != null
+    val hasVitsTtsJsonError = vitsOptionsJsonError != null
     var simpleTtsVoices by remember { mutableStateOf<List<VoiceService.Voice>>(emptyList()) }
     var simpleTtsVoicesLoading by remember { mutableStateOf(false) }
     var simpleTtsVoicesError by remember { mutableStateOf<String?>(null) }
@@ -161,6 +167,9 @@ fun SpeechServicesSettingsScreen(
             ttsVoiceIdInput != httpConfig.voiceId ||
             ttsModelNameInput != httpConfig.modelName ||
             ttsResponsePipelineInput != HttpTtsResponsePipelineStep.encodeList(httpConfig.responsePipeline) ||
+            vitsPackagePathInput != vitsConfig.packagePath ||
+            vitsSpeakerIdInput != vitsConfig.speakerId ||
+            vitsOptionsInput != Json.encodeToString(vitsConfig.options) ||
             ttsCleanerRegexsState.toList() != ttsCleanerRegexs ||
             ttsSpeechRateInput != ttsSpeechRate ||
             ttsPitchInput != ttsPitch ||
@@ -181,6 +190,9 @@ fun SpeechServicesSettingsScreen(
         ttsVoiceIdInput,
         ttsModelNameInput,
         ttsResponsePipelineInput,
+        vitsPackagePathInput,
+        vitsSpeakerIdInput,
+        vitsOptionsInput,
         ttsSpeechRateInput,
         ttsPitchInput,
         ttsCleanerRegexsState.toList(),
@@ -191,18 +203,15 @@ fun SpeechServicesSettingsScreen(
     ) {
         if (!hasPendingChanges) return@LaunchedEffect
         if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.HTTP_TTS && hasHttpTtsJsonError) return@LaunchedEffect
-        if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.ONNX_TTS && hasOnnxTtsJsonError) return@LaunchedEffect
+        if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.VITS_TTS && hasVitsTtsJsonError) return@LaunchedEffect
 
         kotlinx.coroutines.delay(500)
 
         if (!hasPendingChanges) return@LaunchedEffect
         if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.HTTP_TTS && hasHttpTtsJsonError) return@LaunchedEffect
-        if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.ONNX_TTS && hasOnnxTtsJsonError) return@LaunchedEffect
+        if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.VITS_TTS && hasVitsTtsJsonError) return@LaunchedEffect
 
-        val headers = if (
-            ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.HTTP_TTS ||
-                ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.ONNX_TTS
-        ) {
+        val headers = if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.HTTP_TTS) {
             if (ttsHeadersInput.isBlank()) {
                 emptyMap()
             } else {
@@ -227,6 +236,21 @@ fun SpeechServicesSettingsScreen(
                 httpConfig.responsePipeline
             }
 
+        val vitsOptions =
+            if (ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.VITS_TTS) {
+                if (vitsOptionsInput.isBlank()) {
+                    emptyMap()
+                } else {
+                    try {
+                        Json.decodeFromString<Map<String, String>>(vitsOptionsInput)
+                    } catch (_: Exception) {
+                        return@LaunchedEffect
+                    }
+                }
+            } else {
+                vitsConfig.options
+            }
+
         val httpConfigData = SpeechServicesPreferences.TtsHttpConfig(
             urlTemplate = ttsUrlTemplateInput,
             apiKey = ttsApiKeyInput,
@@ -240,6 +264,12 @@ fun SpeechServicesSettingsScreen(
             responsePipeline = responsePipeline
         )
 
+        val vitsConfigData = SpeechServicesPreferences.VitsTtsPackageConfig(
+            packagePath = vitsPackagePathInput,
+            speakerId = vitsSpeakerIdInput,
+            options = vitsOptions
+        )
+
         val sttHttpConfigData = SpeechServicesPreferences.SttHttpConfig(
             endpointUrl = sttEndpointUrlInput,
             apiKey = sttApiKeyInput,
@@ -250,6 +280,7 @@ fun SpeechServicesSettingsScreen(
             prefs.saveTtsSettings(
                 serviceType = ttsServiceTypeInput,
                 httpConfig = httpConfigData,
+                vitsConfig = vitsConfigData,
                 cleanerRegexs = ttsCleanerRegexsState.toList(),
                 speechRate = ttsSpeechRateInput,
                 pitch = ttsPitchInput
@@ -377,8 +408,10 @@ fun SpeechServicesSettingsScreen(
                                     VoiceServiceFactory.VoiceServiceType.OPENAI_WS_TTS -> stringResource(R.string.speech_services_tts_type_openai_ws)
                                     VoiceServiceFactory.VoiceServiceType.SILICONFLOW_TTS -> stringResource(R.string.speech_services_tts_type_siliconflow)
                                     VoiceServiceFactory.VoiceServiceType.MINIMAX_TTS -> stringResource(R.string.speech_services_tts_type_minimax)
+                                    VoiceServiceFactory.VoiceServiceType.MIMO_TTS -> stringResource(R.string.speech_services_tts_type_mimo)
+                                    VoiceServiceFactory.VoiceServiceType.DOUBAO_TTS -> stringResource(R.string.speech_services_tts_type_doubao)
                                     VoiceServiceFactory.VoiceServiceType.OPENAI_TTS -> stringResource(R.string.speech_services_tts_type_openai)
-                                    VoiceServiceFactory.VoiceServiceType.ONNX_TTS -> stringResource(R.string.speech_services_tts_type_onnx)
+                                    VoiceServiceFactory.VoiceServiceType.VITS_TTS -> stringResource(R.string.speech_services_tts_type_vits)
                                 },
                                 onValueChange = {},
                                 readOnly = true,
@@ -402,14 +435,21 @@ fun SpeechServicesSettingsScreen(
                                                     VoiceServiceFactory.VoiceServiceType.OPENAI_WS_TTS -> stringResource(R.string.speech_services_tts_type_openai_ws)
                                                     VoiceServiceFactory.VoiceServiceType.SILICONFLOW_TTS -> stringResource(R.string.speech_services_tts_type_siliconflow)
                                                     VoiceServiceFactory.VoiceServiceType.MINIMAX_TTS -> stringResource(R.string.speech_services_tts_type_minimax)
+                                                    VoiceServiceFactory.VoiceServiceType.MIMO_TTS -> stringResource(R.string.speech_services_tts_type_mimo)
+                                                    VoiceServiceFactory.VoiceServiceType.DOUBAO_TTS -> stringResource(R.string.speech_services_tts_type_doubao)
                                                     VoiceServiceFactory.VoiceServiceType.OPENAI_TTS -> stringResource(R.string.speech_services_tts_type_openai)
-                                                    VoiceServiceFactory.VoiceServiceType.ONNX_TTS -> stringResource(R.string.speech_services_tts_type_onnx)
+                                                    VoiceServiceFactory.VoiceServiceType.VITS_TTS -> stringResource(R.string.speech_services_tts_type_vits)
                                                 },
                                                 fontWeight = if (ttsServiceTypeInput == type) FontWeight.Medium else FontWeight.Normal
                                             ) 
                                         },
                                         onClick = {
                                             ttsServiceTypeInput = type
+                                            if (type == VoiceServiceFactory.VoiceServiceType.DOUBAO_TTS) {
+                                                ttsUrlTemplateInput = DoubaoVoiceProvider.DEFAULT_ENDPOINT_URL
+                                                ttsVoiceIdInput = DoubaoVoiceProvider.DEFAULT_VOICE_ID
+                                                ttsContentTypeInput = "application/json"
+                                            }
                                             ttsDropdownExpanded = false
                                         }
                                     )
@@ -835,10 +875,10 @@ fun SpeechServicesSettingsScreen(
                             }
                         }
 
-                        AnimatedVisibility(visible = ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.ONNX_TTS) {
+                        AnimatedVisibility(visible = ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.VITS_TTS) {
                             Column(modifier = Modifier.padding(top = 16.dp)) {
                                 Text(
-                                    text = stringResource(R.string.speech_services_onnx_config),
+                                    text = stringResource(R.string.speech_services_vits_config),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -846,15 +886,15 @@ fun SpeechServicesSettingsScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 OutlinedTextField(
-                                    value = ttsUrlTemplateInput,
-                                    onValueChange = { ttsUrlTemplateInput = it },
-                                    label = { Text(stringResource(R.string.speech_services_onnx_model_path)) },
-                                    placeholder = { Text(stringResource(R.string.speech_services_onnx_model_path_placeholder)) },
+                                    value = vitsPackagePathInput,
+                                    onValueChange = { vitsPackagePathInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_vits_package_path)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_vits_package_path_placeholder)) },
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
                                     supportingText = {
                                         Text(
-                                            text = stringResource(R.string.speech_services_onnx_model_path_hint),
+                                            text = stringResource(R.string.speech_services_vits_package_path_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -864,15 +904,15 @@ fun SpeechServicesSettingsScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 OutlinedTextField(
-                                    value = ttsModelNameInput,
-                                    onValueChange = { ttsModelNameInput = it },
-                                    label = { Text(stringResource(R.string.speech_services_onnx_config_path)) },
-                                    placeholder = { Text(stringResource(R.string.speech_services_onnx_config_path_placeholder)) },
+                                    value = vitsSpeakerIdInput,
+                                    onValueChange = { vitsSpeakerIdInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_vits_speaker_id)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_vits_speaker_id_placeholder)) },
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
                                     supportingText = {
                                         Text(
-                                            text = stringResource(R.string.speech_services_onnx_config_path_hint),
+                                            text = stringResource(R.string.speech_services_vits_speaker_id_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -882,55 +922,37 @@ fun SpeechServicesSettingsScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 OutlinedTextField(
-                                    value = ttsVoiceIdInput,
-                                    onValueChange = { ttsVoiceIdInput = it },
-                                    label = { Text(stringResource(R.string.speech_services_onnx_speaker_id)) },
-                                    placeholder = { Text(stringResource(R.string.speech_services_onnx_speaker_id_placeholder)) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    supportingText = {
-                                        Text(
-                                            text = stringResource(R.string.speech_services_onnx_speaker_id_hint),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                OutlinedTextField(
-                                    value = ttsHeadersInput,
+                                    value = vitsOptionsInput,
                                     onValueChange = {
-                                        ttsHeadersInput = it
+                                        vitsOptionsInput = it
                                         try {
                                             if (it.isBlank()) {
-                                                onnxTtsHeadersJsonError = null
+                                                vitsOptionsJsonError = null
                                             } else {
                                                 Json.decodeFromString<Map<String, String>>(it)
-                                                onnxTtsHeadersJsonError = null
+                                                vitsOptionsJsonError = null
                                             }
                                         } catch (_: Exception) {
-                                            onnxTtsHeadersJsonError = context.getString(R.string.speech_services_onnx_headers_error)
+                                            vitsOptionsJsonError = context.getString(R.string.speech_services_vits_options_error)
                                         }
                                     },
-                                    label = { Text(stringResource(R.string.speech_services_onnx_options)) },
-                                    placeholder = { Text(stringResource(R.string.speech_services_onnx_options_placeholder)) },
+                                    label = { Text(stringResource(R.string.speech_services_vits_options)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_vits_options_placeholder)) },
                                     modifier = Modifier.fillMaxWidth(),
                                     minLines = 5,
-                                    isError = onnxTtsHeadersJsonError != null,
+                                    isError = vitsOptionsJsonError != null,
                                     supportingText = {
                                         Text(
-                                            text = stringResource(R.string.speech_services_onnx_options_hint),
+                                            text = stringResource(R.string.speech_services_vits_options_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 )
 
-                                if (onnxTtsHeadersJsonError != null) {
+                                if (vitsOptionsJsonError != null) {
                                     Text(
-                                        text = onnxTtsHeadersJsonError!!,
+                                        text = vitsOptionsJsonError!!,
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.padding(top = 4.dp)
@@ -1121,6 +1143,228 @@ fun SpeechServicesSettingsScreen(
                                     supportingText = {
                                         Text(
                                             text = stringResource(R.string.speech_services_minimax_voice_id_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        AnimatedVisibility(visible = ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.MIMO_TTS) {
+                            Column(modifier = Modifier.padding(top = 16.dp)) {
+                                Text(
+                                    text = stringResource(R.string.speech_services_mimo_config),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsUrlTemplateInput,
+                                    onValueChange = { ttsUrlTemplateInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_mimo_url)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_mimo_url_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    supportingText = {
+                                        Text(
+                                            text = stringResource(R.string.speech_services_mimo_url_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsApiKeyInput,
+                                    onValueChange = { ttsApiKeyInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_mimo_api_key)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_mimo_api_key_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsModelNameInput,
+                                    onValueChange = { ttsModelNameInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_mimo_model_name)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_mimo_model_name_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    supportingText = {
+                                        Text(
+                                            text = stringResource(R.string.speech_services_mimo_model_name_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                var mimoVoiceDropdownExpanded by remember { mutableStateOf(false) }
+                                val mimoVoices = remember { MimoVoiceProvider.AVAILABLE_VOICES }
+                                val selectedMimoVoiceName = remember(ttsVoiceIdInput) {
+                                    mimoVoices.find { it.id == ttsVoiceIdInput }?.name
+                                        ?: context.getString(R.string.speech_services_mimo_voice_custom)
+                                }
+
+                                ExposedDropdownMenuBox(
+                                    expanded = mimoVoiceDropdownExpanded,
+                                    onExpandedChange = { mimoVoiceDropdownExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedMimoVoiceName,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.speech_services_mimo_voice_select)) },
+                                        trailingIcon = {
+                                            Icon(Icons.Default.ArrowDropDown, stringResource(R.string.speech_services_mimo_voice_select_icon))
+                                        },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = mimoVoiceDropdownExpanded,
+                                        onDismissRequest = { mimoVoiceDropdownExpanded = false }
+                                    ) {
+                                        mimoVoices.forEach { voice ->
+                                            DropdownMenuItem(
+                                                text = { Text("${voice.name} (${voice.id})") },
+                                                onClick = {
+                                                    ttsVoiceIdInput = voice.id
+                                                    mimoVoiceDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsVoiceIdInput,
+                                    onValueChange = { ttsVoiceIdInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_mimo_voice_id)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_mimo_voice_id_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    minLines = 3,
+                                    maxLines = 8,
+                                    supportingText = {
+                                        Text(
+                                            text = stringResource(R.string.speech_services_mimo_voice_id_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        AnimatedVisibility(visible = ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.DOUBAO_TTS) {
+                            Column(modifier = Modifier.padding(top = 16.dp)) {
+                                Text(
+                                    text = stringResource(R.string.speech_services_doubao_config),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsUrlTemplateInput,
+                                    onValueChange = { ttsUrlTemplateInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_doubao_url)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_doubao_url_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    supportingText = {
+                                        Text(
+                                            text = stringResource(R.string.speech_services_doubao_url_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsModelNameInput,
+                                    onValueChange = { ttsModelNameInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_doubao_appid)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_doubao_appid_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsApiKeyInput,
+                                    onValueChange = { ttsApiKeyInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_doubao_token)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_doubao_token_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                var doubaoVoiceDropdownExpanded by remember { mutableStateOf(false) }
+                                val doubaoVoices = remember { DoubaoVoiceProvider.AVAILABLE_VOICES }
+                                val selectedDoubaoVoiceName = remember(ttsVoiceIdInput) {
+                                    doubaoVoices.find { it.id == ttsVoiceIdInput }?.name
+                                        ?: context.getString(R.string.speech_services_doubao_voice_custom)
+                                }
+
+                                ExposedDropdownMenuBox(
+                                    expanded = doubaoVoiceDropdownExpanded,
+                                    onExpandedChange = { doubaoVoiceDropdownExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedDoubaoVoiceName,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.speech_services_doubao_voice_select)) },
+                                        trailingIcon = {
+                                            Icon(Icons.Default.ArrowDropDown, stringResource(R.string.speech_services_doubao_voice_select_icon))
+                                        },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = doubaoVoiceDropdownExpanded,
+                                        onDismissRequest = { doubaoVoiceDropdownExpanded = false }
+                                    ) {
+                                        doubaoVoices.forEach { voice ->
+                                            DropdownMenuItem(
+                                                text = { Text("${voice.name} (${voice.id})") },
+                                                onClick = {
+                                                    ttsVoiceIdInput = voice.id
+                                                    doubaoVoiceDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = ttsVoiceIdInput,
+                                    onValueChange = { ttsVoiceIdInput = it },
+                                    label = { Text(stringResource(R.string.speech_services_doubao_voice_id)) },
+                                    placeholder = { Text(stringResource(R.string.speech_services_doubao_voice_id_placeholder)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    supportingText = {
+                                        Text(
+                                            text = stringResource(R.string.speech_services_doubao_voice_id_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

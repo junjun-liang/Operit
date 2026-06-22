@@ -12,6 +12,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -64,6 +64,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -75,7 +76,7 @@ import com.ai.assistance.operit.data.model.AiReference
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 import com.ai.assistance.operit.data.model.ChatMessageLocatorPreview
-import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
+import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 
 import androidx.compose.ui.window.PopupProperties
 
@@ -93,7 +94,8 @@ import com.ai.assistance.operit.ui.features.chat.components.style.cursor.CursorS
 import com.ai.assistance.operit.ui.features.chat.components.style.bubble.BubbleImageStyleConfig
 import com.ai.assistance.operit.ui.features.chat.components.style.bubble.BubbleStyleChatMessage
 import com.ai.assistance.operit.util.ChatMarkupRegex
-import com.ai.assistance.operit.util.WaifuMessageProcessor
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -127,8 +129,6 @@ private fun cleanXmlTags(content: String): String {
         // 移除多媒体链接标签
         .let(MediaLinkParser::removeImageLinks)
         .let(MediaLinkParser::removeMediaLinks)
-        // 移除其他常见的XML标签
-        // .replace(Regex("<[^>]*>"), "")
         .trim()
 }
 
@@ -183,7 +183,7 @@ fun ChatArea(
     onLoadOlderDisplayWindow: (() -> Unit)? = null,
     onLoadNewerDisplayWindow: (() -> Unit)? = null,
     onShowLatestDisplayWindow: (() -> Unit)? = null,
-    loadMessageLocatorEntries: (suspend (String) -> List<ChatMessageLocatorPreview>)? = null,
+    loadMessageLocatorEntries: (suspend (String, String) -> List<ChatMessageLocatorPreview>)? = null,
     onRevealMessageForLocator: (suspend (Long) -> Boolean)? = null,
     topPadding: Dp = 0.dp,
     bottomPadding: Dp = 0.dp,
@@ -210,12 +210,15 @@ fun ChatArea(
     showChatFloatingDotsAnimation: Boolean = true,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
-    val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
+    val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val showMessageTokenStats by
-        displayPreferencesManager.showMessageTokenStats.collectAsState(initial = false)
+        preferencesManager.showMessageTokenStats.collectAsState(initial = false)
     val showMessageTimingStats by
-        displayPreferencesManager.showMessageTimingStats.collectAsState(initial = false)
+        preferencesManager.showMessageTimingStats.collectAsState(initial = false)
+    val showMessageTimestamp by
+        preferencesManager.showMessageTimestamp.collectAsState(initial = false)
     var viewportHeightPx by remember { mutableStateOf(0) }
     val messageAnchors = remember(currentChatId) { mutableStateMapOf<Long, ChatScrollMessageAnchor>() }
     var pendingJumpToMessageTimestamp by remember(currentChatId) { mutableStateOf<Long?>(null) }
@@ -323,7 +326,6 @@ fun ChatArea(
             showLoadingIndicator &&
             chatStyle == ChatStyle.BUBBLE &&
             lastMessage?.sender == "ai"
-
     Box(
         modifier =
             modifier
@@ -405,6 +407,7 @@ fun ChatArea(
                             chatStyle = chatStyle,
                             showMessageTokenStats = showMessageTokenStats,
                             showMessageTimingStats = showMessageTimingStats,
+                            showMessageTimestamp = showMessageTimestamp,
                             cursorUserBubbleLiquidGlass = cursorUserBubbleLiquidGlass,
                             cursorUserBubbleWaterGlass = cursorUserBubbleWaterGlass,
                             bubbleUserBubbleLiquidGlass = bubbleUserBubbleLiquidGlass,
@@ -495,7 +498,11 @@ fun ChatArea(
             scrollState = scrollState,
             messageAnchors = messageAnchors,
             viewportHeightPx = viewportHeightPx,
+            autoScrollToBottom = autoScrollToBottom,
+            hasNewerDisplayHistory = hasNewerDisplayHistory,
             loadLocatorEntries = loadMessageLocatorEntries,
+            onRequestLatestMessages = onShowLatestDisplayWindow,
+            onAutoScrollToBottomChange = onAutoScrollToBottomChange,
             onToggleFavoriteMessage = onToggleFavoriteMessage,
             onJumpToMessageTimestamp = { targetTimestamp ->
                 pendingJumpToMessageTimestamp = targetTimestamp
@@ -569,6 +576,7 @@ private fun MessageItem(
     chatStyle: ChatStyle, // 新增参数
     showMessageTokenStats: Boolean = false,
     showMessageTimingStats: Boolean = false,
+    showMessageTimestamp: Boolean = false,
     cursorUserBubbleLiquidGlass: Boolean = false,
     cursorUserBubbleWaterGlass: Boolean = false,
     bubbleUserBubbleLiquidGlass: Boolean = false,
@@ -593,8 +601,9 @@ private fun MessageItem(
     var showContextMenu by remember { mutableStateOf(false) }
     var showMessageInfoDialog by remember { mutableStateOf(false) }
     var showHiddenUserMessageDialog by remember { mutableStateOf(false) }
+    var showDeleteMessageConfirmDialog by remember { mutableStateOf(false) }
     var copyPreviewText by remember { mutableStateOf<String?>(null) }
-
+    val context = LocalContext.current
 
     // 只有用户和AI的消息才能被操作
     val isActionable = message.sender == "user" || message.sender == "ai"
@@ -690,13 +699,15 @@ private fun MessageItem(
                 (
                     message.variantCount > 1 ||
                         (showMessageTokenStats && hasDisplayableTokenStats(message)) ||
-                        (showMessageTimingStats && hasDisplayableTimingStats(message))
+                        (showMessageTimingStats && hasDisplayableTimingStats(message)) ||
+                        (showMessageTimestamp && hasDisplayableMessageTimestamp(message))
                 )
             ) {
                 MessageFooterBar(
                     message = message,
                     showMessageTokenStats = showMessageTokenStats,
                     showMessageTimingStats = showMessageTimingStats,
+                    showMessageTimestamp = showMessageTimestamp,
                     onSelectVariant = { targetVariantIndex ->
                         onSwitchMessageVariant?.invoke(index, targetVariantIndex)
                     },
@@ -708,11 +719,8 @@ private fun MessageItem(
             expanded = showContextMenu,
             onDismissRequest = { showContextMenu = false },
             modifier = Modifier
-                .width(180.dp),
-            shape = RoundedCornerShape(6.dp),
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 1f),
-            tonalElevation = 6.dp,
-            shadowElevation = 10.dp,
+                .width(180.dp)
+                .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(6.dp)),
             properties = PopupProperties(
                 focusable = true,
                 dismissOnBackPress = true,
@@ -720,7 +728,6 @@ private fun MessageItem(
             )
         ) {
             if (!isHiddenUserMessage) {
-                // 复制选项
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -904,8 +911,8 @@ private fun MessageItem(
                     )
                 },
                 onClick = {
-                    onDeleteMessage?.invoke(index)
                     showContextMenu = false
+                    showDeleteMessageConfirmDialog = true
                 },
                 leadingIcon = {
                     Icon(
@@ -1069,6 +1076,29 @@ private fun MessageItem(
             )
         }
 
+        if (showDeleteMessageConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteMessageConfirmDialog = false },
+                title = { Text(text = stringResource(R.string.confirm_delete)) },
+                text = { Text(text = stringResource(R.string.chat_delete_message_confirm_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onDeleteMessage?.invoke(index)
+                            showDeleteMessageConfirmDialog = false
+                        }
+                    ) {
+                        Text(text = stringResource(R.string.confirm_delete_action))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteMessageConfirmDialog = false }) {
+                        Text(text = stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
         copyPreviewText?.let { previewText ->
             MessageCopyPreviewBottomSheet(
                 text = previewText,
@@ -1128,7 +1158,7 @@ private fun MessageCopyPreviewBottomSheet(
                         ).show()
                     }
                 ) {
-                    Text(text = stringResource(id = R.string.copy_all_content))
+                    Text(text = stringResource(id = R.string.copy_message))
                 }
             }
         }
@@ -1141,6 +1171,10 @@ private fun hasDisplayableTokenStats(message: ChatMessage): Boolean {
 
 private fun hasDisplayableTimingStats(message: ChatMessage): Boolean {
     return message.waitDurationMs > 0L || message.outputDurationMs > 0L
+}
+
+private fun hasDisplayableMessageTimestamp(message: ChatMessage): Boolean {
+    return message.completedAt > 0L
 }
 
 private fun formatCompactDuration(durationMs: Long): String {
@@ -1156,11 +1190,17 @@ private fun formatCompactDuration(durationMs: Long): String {
     }
 }
 
+private fun formatCompactTimestamp(completedAt: Long): String {
+    if (completedAt <= 0L) return ""
+    return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(completedAt))
+}
+
 @Composable
 private fun MessageFooterBar(
     message: ChatMessage,
     showMessageTokenStats: Boolean,
     showMessageTimingStats: Boolean,
+    showMessageTimestamp: Boolean,
     onSelectVariant: (Int) -> Unit,
 ) {
     val hasPrevious = message.selectedVariantIndex > 0
@@ -1185,6 +1225,13 @@ private fun MessageFooterBar(
                 formatCompactDuration(totalDuration),
                 formatCompactDuration(message.waitDurationMs),
                 formatCompactDuration(message.outputDurationMs),
+            )
+        }
+    val messageTimeSummary =
+        remember(message.completedAt) {
+            context.getString(
+                R.string.chat_message_timestamp_compact,
+                formatCompactTimestamp(message.completedAt),
             )
         }
     val statsTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
@@ -1254,6 +1301,14 @@ private fun MessageFooterBar(
         if (showMessageTimingStats && hasDisplayableTimingStats(message)) {
             Text(
                 text = timeSummary,
+                style = MaterialTheme.typography.labelSmall,
+                color = statsTextColor,
+            )
+        }
+
+        if (showMessageTimestamp && hasDisplayableMessageTimestamp(message)) {
+            Text(
+                text = messageTimeSummary,
                 style = MaterialTheme.typography.labelSmall,
                 color = statsTextColor,
             )

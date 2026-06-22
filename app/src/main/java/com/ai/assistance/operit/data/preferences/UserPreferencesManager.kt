@@ -266,6 +266,13 @@ class UserPreferencesManager private constructor(private val context: Context) {
         private val KEY_CHAT_STYLE = stringPreferencesKey("chat_style")
         private val KEY_SHOW_THINKING_PROCESS = booleanPreferencesKey("show_thinking_process")
         private val KEY_SHOW_STATUS_TAGS = booleanPreferencesKey("show_status_tags")
+        private val KEY_SHOW_MODEL_PROVIDER = booleanPreferencesKey("show_model_provider")
+        private val KEY_SHOW_MODEL_NAME = booleanPreferencesKey("show_model_name")
+        private val KEY_SHOW_ROLE_NAME = booleanPreferencesKey("show_role_name")
+        private val KEY_SHOW_USER_NAME = booleanPreferencesKey("show_user_name")
+        private val KEY_SHOW_MESSAGE_TOKEN_STATS = booleanPreferencesKey("show_message_token_stats")
+        private val KEY_SHOW_MESSAGE_TIMING_STATS = booleanPreferencesKey("show_message_timing_stats")
+        private val KEY_SHOW_MESSAGE_TIMESTAMP = booleanPreferencesKey("show_message_timestamp")
         private val KEY_CUSTOM_USER_AVATAR_URI = stringPreferencesKey("custom_user_avatar_uri")
         private val KEY_CUSTOM_AI_AVATAR_URI = stringPreferencesKey("custom_ai_avatar_uri")
         private val KEY_AVATAR_SHAPE = stringPreferencesKey("avatar_shape")
@@ -280,7 +287,6 @@ class UserPreferencesManager private constructor(private val context: Context) {
 
 
         // 布局调整设置
-        // 注意：全局用户头像和名称设置已移至 DisplayPreferencesManager
         private val CHAT_SETTINGS_BUTTON_END_PADDING = floatPreferencesKey("chat_settings_button_end_padding")
         private val CHAT_AREA_HORIZONTAL_PADDING = floatPreferencesKey("chat_area_horizontal_padding")
         private val AI_MARKDOWN_LINE_HEIGHT_MULTIPLIER =
@@ -850,6 +856,41 @@ class UserPreferencesManager private constructor(private val context: Context) {
                 preferences[KEY_SHOW_STATUS_TAGS] ?: true
             }
 
+    val showModelProvider: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_MODEL_PROVIDER] ?: false
+        }
+
+    val showModelName: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_MODEL_NAME] ?: false
+        }
+
+    val showRoleName: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_ROLE_NAME] ?: true
+        }
+
+    val showUserName: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_USER_NAME] ?: true
+        }
+
+    val showMessageTokenStats: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_MESSAGE_TOKEN_STATS] ?: false
+        }
+
+    val showMessageTimingStats: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_MESSAGE_TIMING_STATS] ?: false
+        }
+
+    val showMessageTimestamp: Flow<Boolean> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            preferences[KEY_SHOW_MESSAGE_TIMESTAMP] ?: false
+        }
+
     val customUserAvatarUri: Flow<String?> =
             context.userPreferencesDataStore.data.map { preferences ->
                 preferences[KEY_CUSTOM_USER_AVATAR_URI]
@@ -859,9 +900,6 @@ class UserPreferencesManager private constructor(private val context: Context) {
             context.userPreferencesDataStore.data.map { preferences ->
                 preferences[KEY_CUSTOM_AI_AVATAR_URI]
             }
-
-    // 注意：全局用户头像和名称设置已移至 DisplayPreferencesManager
-    // 如需获取有效的用户头像（角色卡优先，然后回退到全局），请在UI层组合 customUserAvatarUri 和 DisplayPreferencesManager.globalUserAvatarUri
 
     val avatarShape: Flow<String> =
             context.userPreferencesDataStore.data.map { preferences ->
@@ -1209,6 +1247,13 @@ class UserPreferencesManager private constructor(private val context: Context) {
             bubbleAiContentPaddingRight: Float? = null,
             showThinkingProcess: Boolean? = null,
             showStatusTags: Boolean? = null,
+            showModelProvider: Boolean? = null,
+            showModelName: Boolean? = null,
+            showRoleName: Boolean? = null,
+            showUserName: Boolean? = null,
+            showMessageTokenStats: Boolean? = null,
+            showMessageTimingStats: Boolean? = null,
+            showMessageTimestamp: Boolean? = null,
             customUserAvatarUri: String? = null,
             customAiAvatarUri: String? = null,
             avatarShape: String? = null,
@@ -1373,6 +1418,13 @@ class UserPreferencesManager private constructor(private val context: Context) {
             bubbleAiContentPaddingRight?.let { preferences[BUBBLE_AI_CONTENT_PADDING_RIGHT] = it }
             showThinkingProcess?.let { preferences[KEY_SHOW_THINKING_PROCESS] = it }
             showStatusTags?.let { preferences[KEY_SHOW_STATUS_TAGS] = it }
+            showModelProvider?.let { preferences[KEY_SHOW_MODEL_PROVIDER] = it }
+            showModelName?.let { preferences[KEY_SHOW_MODEL_NAME] = it }
+            showRoleName?.let { preferences[KEY_SHOW_ROLE_NAME] = it }
+            showUserName?.let { preferences[KEY_SHOW_USER_NAME] = it }
+            showMessageTokenStats?.let { preferences[KEY_SHOW_MESSAGE_TOKEN_STATS] = it }
+            showMessageTimingStats?.let { preferences[KEY_SHOW_MESSAGE_TIMING_STATS] = it }
+            showMessageTimestamp?.let { preferences[KEY_SHOW_MESSAGE_TIMESTAMP] = it }
             customUserAvatarUri?.let { preferences[KEY_CUSTOM_USER_AVATAR_URI] = it }
             customAiAvatarUri?.let { preferences[KEY_CUSTOM_AI_AVATAR_URI] = it }
             avatarShape?.let { preferences[KEY_AVATAR_SHAPE] = it }
@@ -1382,7 +1434,6 @@ class UserPreferencesManager private constructor(private val context: Context) {
             showInputProcessingStatus?.let { preferences[KEY_SHOW_INPUT_PROCESSING_STATUS] = it }
             showChatFloatingDotsAnimation?.let { preferences[KEY_SHOW_CHAT_FLOATING_DOTS_ANIMATION] = it }
             inputStyle?.let { preferences[INPUT_STYLE] = it }
-            // 注意：全局用户头像和名称已移至 DisplayPreferencesManager
             // 字体设置
             useCustomFont?.let { preferences[USE_CUSTOM_FONT] = it }
             fontType?.let { preferences[FONT_TYPE] = it }
@@ -1483,6 +1534,13 @@ class UserPreferencesManager private constructor(private val context: Context) {
             preferences.remove(BUBBLE_AI_CONTENT_PADDING_RIGHT)
             preferences.remove(KEY_SHOW_THINKING_PROCESS)
             preferences.remove(KEY_SHOW_STATUS_TAGS)
+            preferences.remove(KEY_SHOW_MODEL_PROVIDER)
+            preferences.remove(KEY_SHOW_MODEL_NAME)
+            preferences.remove(KEY_SHOW_ROLE_NAME)
+            preferences.remove(KEY_SHOW_USER_NAME)
+            preferences.remove(KEY_SHOW_MESSAGE_TOKEN_STATS)
+            preferences.remove(KEY_SHOW_MESSAGE_TIMING_STATS)
+            preferences.remove(KEY_SHOW_MESSAGE_TIMESTAMP)
             preferences.remove(KEY_CUSTOM_USER_AVATAR_URI)
             preferences.remove(KEY_CUSTOM_AI_AVATAR_URI)
             preferences.remove(KEY_AVATAR_SHAPE)
@@ -1492,7 +1550,6 @@ class UserPreferencesManager private constructor(private val context: Context) {
             preferences.remove(KEY_SHOW_INPUT_PROCESSING_STATUS)
             preferences.remove(KEY_SHOW_CHAT_FLOATING_DOTS_ANIMATION)
             preferences.remove(INPUT_STYLE)
-            // 全局用户头像和名称已迁移到 DisplayPreferencesManager
             // 重置字体设置
             preferences.remove(USE_CUSTOM_FONT)
             preferences.remove(FONT_TYPE)
@@ -1749,7 +1806,6 @@ class UserPreferencesManager private constructor(private val context: Context) {
             BUBBLE_USER_CUSTOM_FONT_PATH, BUBBLE_AI_FONT_TYPE, BUBBLE_AI_SYSTEM_FONT_NAME,
             BUBBLE_AI_CUSTOM_FONT_PATH, BUBBLE_USER_IMAGE_URI, BUBBLE_AI_IMAGE_URI,
             BUBBLE_IMAGE_RENDER_MODE
-            // 注意：全局用户头像和名称已移至 DisplayPreferencesManager，不跟随角色卡主题切换
         )
     }
 
@@ -1770,8 +1826,10 @@ class UserPreferencesManager private constructor(private val context: Context) {
             BUBBLE_AI_BUBBLE_LIQUID_GLASS, BUBBLE_AI_BUBBLE_WATER_GLASS, BUBBLE_USER_USE_IMAGE,
             BUBBLE_AI_USE_IMAGE, BUBBLE_USER_ROUNDED_CORNERS_ENABLED, BUBBLE_AI_ROUNDED_CORNERS_ENABLED, KEY_SHOW_THINKING_PROCESS, KEY_SHOW_STATUS_TAGS,
             KEY_SHOW_INPUT_PROCESSING_STATUS, KEY_SHOW_CHAT_FLOATING_DOTS_ANIMATION, USE_CUSTOM_FONT,
-            BUBBLE_USER_USE_CUSTOM_FONT, BUBBLE_AI_USE_CUSTOM_FONT
-            // 注意：消息显示设置已移至 DisplayPreferencesManager，不跟随角色卡主题切换
+            BUBBLE_USER_USE_CUSTOM_FONT, BUBBLE_AI_USE_CUSTOM_FONT, KEY_SHOW_MODEL_PROVIDER,
+            KEY_SHOW_MODEL_NAME, KEY_SHOW_ROLE_NAME, KEY_SHOW_USER_NAME,
+            KEY_SHOW_MESSAGE_TOKEN_STATS, KEY_SHOW_MESSAGE_TIMING_STATS,
+            KEY_SHOW_MESSAGE_TIMESTAMP
         )
     }
 
@@ -2091,12 +2149,20 @@ class UserPreferencesManager private constructor(private val context: Context) {
             customUserAvatarUri = stringValue(KEY_CUSTOM_USER_AVATAR_URI),
             customAiAvatarUri = stringValue(KEY_CUSTOM_AI_AVATAR_URI),
             avatarShape = stringValue(KEY_AVATAR_SHAPE, AVATAR_SHAPE_CIRCLE) ?: AVATAR_SHAPE_CIRCLE,
+            avatarCornerRadius = floatValue(KEY_AVATAR_CORNER_RADIUS, 8f),
             fontType = stringValue(FONT_TYPE, FONT_TYPE_SYSTEM) ?: FONT_TYPE_SYSTEM,
             systemFontName = stringValue(SYSTEM_FONT_NAME),
             customFontPath = stringValue(CUSTOM_FONT_PATH),
             fontScale = floatValue(FONT_SCALE, 1.0f),
             showThinkingProcess = booleanValue(KEY_SHOW_THINKING_PROCESS, true),
             showStatusTags = booleanValue(KEY_SHOW_STATUS_TAGS, true),
+            showModelProvider = booleanValue(KEY_SHOW_MODEL_PROVIDER, false),
+            showModelName = booleanValue(KEY_SHOW_MODEL_NAME, false),
+            showRoleName = booleanValue(KEY_SHOW_ROLE_NAME, true),
+            showUserName = booleanValue(KEY_SHOW_USER_NAME, true),
+            showMessageTokenStats = booleanValue(KEY_SHOW_MESSAGE_TOKEN_STATS, false),
+            showMessageTimingStats = booleanValue(KEY_SHOW_MESSAGE_TIMING_STATS, false),
+            showMessageTimestamp = booleanValue(KEY_SHOW_MESSAGE_TIMESTAMP, false),
             showInputProcessingStatus = booleanValue(KEY_SHOW_INPUT_PROCESSING_STATUS, true)
         )
     }

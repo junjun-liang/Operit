@@ -666,7 +666,7 @@ const various_search = (function () {
         }
         const resolved = {};
         const indexes = buildProbeIndexes(response.links, sourceUrl, maxCount);
-        for (const index of indexes) {
+        const tasks = indexes.map(async (index) => {
             try {
                 const follow = await Tools.Net.visit({
                     visit_key: response.visitKey,
@@ -679,10 +679,12 @@ const various_search = (function () {
                     url: chooseBestUrl("", followUrl, sourceUrl) || chooseBestUrl("", contentUrl, sourceUrl)
                 };
             }
-            catch {
+            catch (error) {
+                console.error(`[resolveLinkUrlsByVisitKey] link ${index + 1} failed: ${error.message}`);
                 resolved[index] = { url: "" };
             }
-        }
+        });
+        await Promise.all(tasks);
         return resolved;
     }
     function chooseBestUrl(directUrl, resolvedUrl, sourceUrl) {

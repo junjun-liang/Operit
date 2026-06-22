@@ -1,4 +1,5 @@
 import type { ComposeDslContext, ComposeNode } from "../../../../types/compose-dsl";
+import type { MaterialIconName } from "../../../../types/material-icons";
 import { resolveWindowsSetupI18n, type WindowsSetupI18n } from "../../i18n";
 
 const WINDOWS_PACKAGE_NAME = "windows_control";
@@ -547,37 +548,37 @@ export default function Screen(ctx: ComposeDslContext): ComposeNode {
 
   const statusConfigByStatus: Record<
     ConnectionCardStatus,
-    { text: string; containerColor: string; contentColor: string; icon: string }
+    { text: string; containerColor: string; contentColor: string; icon: MaterialIconName }
   > = {
     idle: {
       text: TEXT.connectionStateIdle,
       containerColor: "surfaceVariant",
       contentColor: "onSurfaceVariant",
-      icon: "computer"
+      icon: Icons.Computer
     },
     checking: {
       text: TEXT.connectionStateChecking,
       containerColor: "tertiaryContainer",
       contentColor: "onTertiaryContainer",
-      icon: "settings"
+      icon: Icons.Sync
     },
     notConfigured: {
       text: TEXT.connectionStateNotConfigured,
       containerColor: "secondaryContainer",
       contentColor: "onSecondaryContainer",
-      icon: "settings"
+      icon: Icons.Settings
     },
     success: {
       text: TEXT.connectionStateSuccess,
       containerColor: "primaryContainer",
       contentColor: "onPrimaryContainer",
-      icon: "checkCircle"
+      icon: Icons.CheckCircle
     },
     failed: {
       text: TEXT.connectionStateFailed,
       containerColor: "errorContainer",
       contentColor: "onErrorContainer",
-      icon: "error"
+      icon: Icons.Error
     }
   };
 

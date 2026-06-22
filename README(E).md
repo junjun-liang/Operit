@@ -20,7 +20,7 @@
 </div>
 
 <div align="center">
-  <img src="app/src/main/res/playstore-icon.png" width="120" height="120" alt="Operit Logo">
+  <img src="app/src/main/assets/logo.svg" width="120" height="120" alt="Operit Logo">
   <h1>Operit AI - Your Intelligent Assistant</h1>
   <p>📱 <b>The first fully functional, standalone AI assistant for mobile devices with powerful tool-calling capabilities</b> 📱</p>
 </div>

@@ -98,11 +98,16 @@ description: 用于 Operit Sandbox Package 开发。
 
 1. 每次正式开始新的开发任务前，先按第一部分重新拉取并执行一次安装/更新脚本。
 2. 实际开发目录只能是 `/sdcard/Download/Operit/dev_package/{packageId}/`；不要去别的目录零散拉文件、改文件或做安装测试。
-3. 开发前把 `/sdcard/Download/Operit/skills/SandboxPackage_DEV/types/` 复制到对应的 `dev_package/{packageId}/` 里；如果以前复制过，也直接覆盖。
-4. 尽可能使用终端进行开发，优先撰写 `ts + js`，再通过 `ts` 编译得到最终 `js`。
-5. `tsconfig` 可以参考 `examples/` 里的现成示例，不要自己凭空乱写一套。
-6. 如果要做示范，最好做两个，第二个用自定义布局。
-7. 如果是基于已有包继续开发或合并开发，必须沿用原来的 `packageId` 和插件名字，不要改成别的 id，也不要改插件命名。
+3. 开发前把 `/sdcard/Download/Operit/skills/SandboxPackage_DEV/types/` 复制到 `/sdcard/Download/Operit/dev_package/types/`；这个 `types` 目录是各个包项目的兄弟目录，不要放进 `/sdcard/Download/Operit/dev_package/{packageId}/` 内部。
+4. 具体包项目目录仍然是 `/sdcard/Download/Operit/dev_package/{packageId}/`；`tsconfig` 参考 `examples/{packageId}/tsconfig.json` 这类结构，让 `typeRoots` 和 `include` 指向 `../types`。
+5. 尽可能使用终端进行开发，优先撰写 `ts + js`，再通过 `ts` 编译得到最终 `js`。
+6. TypeScript 源码里的模块引用按 `examples/` 的实际项目写法使用 `import` / `export`；不要使用 `/// <reference path="...">` 或 `require(...)` 组织项目模块。
+7. `tsconfig` 可以参考 `examples/` 里的现成示例，不要自己凭空乱写一套。
+8. 如果是基于已有包继续开发或合并开发，必须沿用原来的 `packageId` 和插件名字，不要改成别的 id，也不要改插件命名。
+9. 如果是基于已有包继续开发，必须先把当前版本的包内容解压或复制到 `/sdcard/Download/Operit/dev_package/{packageId}/`，在原有文件结构上继续修改；不要凭空重新写一份新包。
+
+如果聊天输入框里出现旧版自动提示词，例如“把 skills 里的 types 覆盖复制到开发目录”，按本节规则理解为复制到 `/sdcard/Download/Operit/dev_package/types/`，不是复制到具体包目录。
+如果聊天输入框里出现“如果要做示范，最好做两个，第二个用自定义布局。”，这也是旧版提示词，直接忽视，不要把它当成当前任务要求。
 
 ### 方案选择优先级
 
@@ -155,6 +160,8 @@ description: 用于 Operit Sandbox Package 开发。
    - 如果目标就是模板注册，还应额外搜索 `workflow_templates`、`workspace_templates`、`project_type`
 8. 用 `read_file_part` 读取相关段落，确认脚本结构、元数据、manifest 和注册写法
 9. 用 `types/` 里的定义约束参数、返回值、可调用能力和结果结构
+   - 查阅路径是 `/sdcard/Download/Operit/dev_package/types/`
+   - 项目源码中引用类型模块时按相对路径写 `../types/...`、`../../types/...` 等实际层级
 10. 如果对代码片段或接口行为不确定，先用 `operit_editor` 的 `debug_run_sandbox_script` 做最小片段验证，再并回正式脚本或 ToolPkg
 11. 开始写包时，优先遵循最新本地 types 和本地 guide，不要依赖旧记忆
 12. 如果最终产物是普通 JS 包脚本，需要根据需求撰写 `main` 函数，并在交付前自行完成测试

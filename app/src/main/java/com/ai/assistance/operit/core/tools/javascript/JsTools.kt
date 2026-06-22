@@ -105,9 +105,22 @@ fun getJsToolsDefinition(): String {
                     if (environment) params.environment = environment;
                     return toolCall("apply_file", params);
                 },
-                zip: (source, destination, environment) => {
+                create: (path, newContent, environment) => {
+                    const params = { path, new: newContent };
+                    if (environment) params.environment = environment;
+                    return toolCall("create_file", params);
+                },
+                edit: (path, oldContent, newContent, environment) => {
+                    const params = { path, old: oldContent, new: newContent };
+                    if (environment) params.environment = environment;
+                    return toolCall("edit_file", params);
+                },
+                zip: (source, destination, environment, include_root_directory) => {
                     const params = { source, destination };
                     if (environment) params.environment = environment;
+                    if (include_root_directory !== undefined) {
+                        params.include_root_directory = include_root_directory ? "true" : "false";
+                    }
                     return toolCall("zip_files", params);
                 },
                 unzip: (source, destination, environment) => {
@@ -625,6 +638,167 @@ fun getJsToolsDefinition(): String {
                 // 获取设备位置
                 getLocation: (highAccuracy = false, timeout = 10) => 
                     toolCall("get_device_location", { high_accuracy: !!highAccuracy, timeout: parseInt(timeout) }),
+                bluetooth: {
+                    requestPermission: () => toolCall("request_bluetooth_permission", {}),
+                    getState: () => toolCall("get_bluetooth_state", {}),
+                    requestEnable: () => toolCall("request_enable_bluetooth", {}),
+                    listBondedDevices: () => toolCall("list_bluetooth_bonded_devices", {}),
+                    scan: (options = {}) => {
+                        const params = {};
+                        if (options && typeof options === "object") {
+                            if (options.durationMs !== undefined && options.durationMs !== null) {
+                                params.duration_ms = String(options.durationMs);
+                            }
+                            if (options.includeBle !== undefined) {
+                                params.include_ble = !!options.includeBle;
+                            }
+                        }
+                        return toolCall("scan_bluetooth_devices", params);
+                    },
+                    connect: (options) => {
+                        const params = { address: options.address };
+                        if (options.uuid !== undefined && options.uuid !== null) {
+                            params.uuid = String(options.uuid);
+                        }
+                        return toolCall("bluetooth_connect", params);
+                    },
+                    listen: (options = {}) => {
+                        const params = {};
+                        if (options && typeof options === "object") {
+                            if (options.name !== undefined && options.name !== null) {
+                                params.name = String(options.name);
+                            }
+                            if (options.uuid !== undefined && options.uuid !== null) {
+                                params.uuid = String(options.uuid);
+                            }
+                        }
+                        return toolCall("bluetooth_listen", params);
+                    },
+                    accept: (listenerSessionId, timeoutMs) => {
+                        const params = { listener_session_id: listenerSessionId };
+                        if (timeoutMs !== undefined && timeoutMs !== null) {
+                            params.timeout_ms = String(timeoutMs);
+                        }
+                        return toolCall("bluetooth_accept", params);
+                    },
+                    send: (sessionId, options) => {
+                        const params = { session_id: sessionId };
+                        if (options.text !== undefined && options.text !== null) {
+                            params.text = String(options.text);
+                        }
+                        if (options.dataBase64 !== undefined && options.dataBase64 !== null) {
+                            params.data_base64 = String(options.dataBase64);
+                        }
+                        return toolCall("bluetooth_send", params);
+                    },
+                    read: (sessionId, options = {}) => {
+                        const params = { session_id: sessionId };
+                        if (options && typeof options === "object") {
+                            if (options.maxBytes !== undefined && options.maxBytes !== null) {
+                                params.max_bytes = String(options.maxBytes);
+                            }
+                            if (options.timeoutMs !== undefined && options.timeoutMs !== null) {
+                                params.timeout_ms = String(options.timeoutMs);
+                            }
+                        }
+                        return toolCall("bluetooth_read", params);
+                    },
+                    sendAndRead: (sessionId, options) => {
+                        const params = { session_id: sessionId };
+                        if (options.text !== undefined && options.text !== null) {
+                            params.text = String(options.text);
+                        }
+                        if (options.dataBase64 !== undefined && options.dataBase64 !== null) {
+                            params.data_base64 = String(options.dataBase64);
+                        }
+                        if (options.maxBytes !== undefined && options.maxBytes !== null) {
+                            params.max_bytes = String(options.maxBytes);
+                        }
+                        if (options.timeoutMs !== undefined && options.timeoutMs !== null) {
+                            params.timeout_ms = String(options.timeoutMs);
+                        }
+                        return toolCall("bluetooth_send_and_read", params);
+                    },
+                    close: (sessionId) => toolCall("bluetooth_close", { session_id: sessionId }),
+                    ble: {
+                        connect: (options) => {
+                            const params = { address: options.address };
+                            if (options.autoConnect !== undefined) {
+                                params.auto_connect = !!options.autoConnect;
+                            }
+                            return toolCall("bluetooth_ble_connect", params);
+                        },
+                        discoverServices: (sessionId, timeoutMs) => {
+                            const params = { session_id: sessionId };
+                            if (timeoutMs !== undefined && timeoutMs !== null) {
+                                params.timeout_ms = String(timeoutMs);
+                            }
+                            return toolCall("bluetooth_ble_discover_services", params);
+                        },
+                        readCharacteristic: (sessionId, options) => {
+                            const params = {
+                                session_id: sessionId,
+                                service_uuid: options.serviceUuid,
+                                characteristic_uuid: options.characteristicUuid
+                            };
+                            if (options.timeoutMs !== undefined && options.timeoutMs !== null) {
+                                params.timeout_ms = String(options.timeoutMs);
+                            }
+                            return toolCall("bluetooth_ble_read_characteristic", params);
+                        },
+                        writeCharacteristic: (sessionId, options) => {
+                            const params = {
+                                session_id: sessionId,
+                                service_uuid: options.serviceUuid,
+                                characteristic_uuid: options.characteristicUuid
+                            };
+                            if (options.text !== undefined && options.text !== null) {
+                                params.text = String(options.text);
+                            }
+                            if (options.dataBase64 !== undefined && options.dataBase64 !== null) {
+                                params.data_base64 = String(options.dataBase64);
+                            }
+                            return toolCall("bluetooth_ble_write_characteristic", params);
+                        },
+                        writeAndReadCharacteristic: (sessionId, options) => {
+                            const params = {
+                                session_id: sessionId,
+                                write_service_uuid: options.writeServiceUuid,
+                                write_characteristic_uuid: options.writeCharacteristicUuid,
+                                read_service_uuid: options.readServiceUuid,
+                                read_characteristic_uuid: options.readCharacteristicUuid
+                            };
+                            if (options.text !== undefined && options.text !== null) {
+                                params.text = String(options.text);
+                            }
+                            if (options.dataBase64 !== undefined && options.dataBase64 !== null) {
+                                params.data_base64 = String(options.dataBase64);
+                            }
+                            if (options.timeoutMs !== undefined && options.timeoutMs !== null) {
+                                params.timeout_ms = String(options.timeoutMs);
+                            }
+                            return toolCall("bluetooth_ble_write_and_read_characteristic", params);
+                        },
+                        subscribe: (sessionId, options) => {
+                            const params = {
+                                session_id: sessionId,
+                                service_uuid: options.serviceUuid,
+                                characteristic_uuid: options.characteristicUuid
+                            };
+                            if (options.enable !== undefined) {
+                                params.enable = !!options.enable;
+                            }
+                            return toolCall("bluetooth_ble_subscribe_characteristic", params);
+                        },
+                        readNotifications: (sessionId, limit) => {
+                            const params = { session_id: sessionId };
+                            if (limit !== undefined && limit !== null) {
+                                params.limit = String(limit);
+                            }
+                            return toolCall("bluetooth_ble_read_notifications", params);
+                        }
+                    }
+                },
                 shell: (command) => toolCall("execute_shell", { command }),
                 // 执行终端命令 - 一次性收集输出
                 terminal: {
@@ -675,6 +849,92 @@ fun getJsToolsDefinition(): String {
                         }
                         return toolCall("input_in_terminal_session", params);
                     }
+                },
+                music: {
+                    play: (options) => {
+                        if (!options || typeof options !== "object" || Array.isArray(options)) {
+                            throw new Error("music.play requires one options object");
+                        }
+                        const params = { ...options };
+                        if (params.sourceType !== undefined && params.sourceType !== null) {
+                            params.source_type = String(params.sourceType);
+                            delete params.sourceType;
+                        }
+                        if (params.startPositionMs !== undefined && params.startPositionMs !== null) {
+                            params.start_position_ms = String(params.startPositionMs);
+                            delete params.startPositionMs;
+                        }
+                        if (params.source !== undefined && params.source !== null) {
+                            params.source = String(params.source);
+                        }
+                        if (params.source_type !== undefined && params.source_type !== null) {
+                            params.source_type = String(params.source_type);
+                        }
+                        if (params.title !== undefined && params.title !== null) {
+                            params.title = String(params.title);
+                        }
+                        if (params.artist !== undefined && params.artist !== null) {
+                            params.artist = String(params.artist);
+                        }
+                        if (params.loop !== undefined) {
+                            params.loop = !!params.loop;
+                        }
+                        if (params.volume !== undefined && params.volume !== null) {
+                            params.volume = String(params.volume);
+                        }
+                        return toolCall("music_play", params);
+                    },
+                    playQueue: (options) => {
+                        if (!options || typeof options !== "object" || Array.isArray(options)) {
+                            throw new Error("music.playQueue requires one options object");
+                        }
+                        if (!Array.isArray(options.items)) {
+                            throw new Error("music.playQueue requires items array");
+                        }
+                        const items = options.items.map((item, index) => {
+                            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                                throw new Error("music.playQueue items[" + index + "] must be an object");
+                            }
+                            const mapped = { ...item };
+                            if (mapped.sourceType !== undefined && mapped.sourceType !== null) {
+                                mapped.source_type = String(mapped.sourceType);
+                                delete mapped.sourceType;
+                            }
+                            if (mapped.source !== undefined && mapped.source !== null) {
+                                mapped.source = String(mapped.source);
+                            }
+                            if (mapped.source_type !== undefined && mapped.source_type !== null) {
+                                mapped.source_type = String(mapped.source_type);
+                            }
+                            if (mapped.title !== undefined && mapped.title !== null) {
+                                mapped.title = String(mapped.title);
+                            }
+                            if (mapped.artist !== undefined && mapped.artist !== null) {
+                                mapped.artist = String(mapped.artist);
+                            }
+                            return mapped;
+                        });
+                        const params = { items: JSON.stringify(items) };
+                        if (options.loop !== undefined) {
+                            params.loop = !!options.loop;
+                        }
+                        if (options.volume !== undefined && options.volume !== null) {
+                            params.volume = String(options.volume);
+                        }
+                        if (options.startIndex !== undefined && options.startIndex !== null) {
+                            params.start_index = String(options.startIndex);
+                        }
+                        if (options.startPositionMs !== undefined && options.startPositionMs !== null) {
+                            params.start_position_ms = String(options.startPositionMs);
+                        }
+                        return toolCall("music_play_queue", params);
+                    },
+                    pause: () => toolCall("music_pause", {}),
+                    resume: () => toolCall("music_resume", {}),
+                    stop: () => toolCall("music_stop", {}),
+                    seek: (positionMs) => toolCall("music_seek", { position_ms: String(positionMs) }),
+                    setVolume: (volume) => toolCall("music_set_volume", { volume: String(volume) }),
+                    status: () => toolCall("music_status", {})
                 },
                 // 执行Intent
                 intent: (options = {}) => {
@@ -867,96 +1127,188 @@ fun getJsToolsDefinition(): String {
             },
             // 记忆管理
             Memory: {
+                _normalizeCallerCardId: (callerCardId) => {
+                    if (callerCardId === undefined || callerCardId === null) return undefined;
+                    const normalized = String(callerCardId).trim();
+                    return normalized.length > 0 ? normalized : undefined;
+                },
                 // 查询记忆库
-                query: (query, folderPath, limit, startTime, endTime, snapshotId, threshold) => {
-                    const params = { query };
-                    if (folderPath) params.folder_path = folderPath;
-                    if (startTime !== undefined) params.start_time = startTime;
-                    if (endTime !== undefined) params.end_time = endTime;
-                    if (limit !== undefined) params.limit = limit;
-                    if (snapshotId !== undefined && snapshotId !== null) params.snapshot_id = String(snapshotId);
-                    if (threshold !== undefined) params.threshold = threshold;
+                query: (query, folderPath, limit, startTime, endTime, snapshotId, threshold, callerCardId) => {
+                    const options =
+                        query && typeof query === 'object' && !Array.isArray(query)
+                            ? query
+                            : {
+                                query,
+                                folderPath,
+                                limit,
+                                startTime,
+                                endTime,
+                                snapshotId,
+                                threshold,
+                                callerCardId
+                            };
+                    const params = { query: options.query };
+                    if (options.folderPath) params.folder_path = options.folderPath;
+                    if (options.startTime !== undefined) params.start_time = options.startTime;
+                    if (options.endTime !== undefined) params.end_time = options.endTime;
+                    if (options.limit !== undefined) params.limit = options.limit;
+                    if (options.snapshotId !== undefined && options.snapshotId !== null) params.snapshot_id = String(options.snapshotId);
+                    if (options.threshold !== undefined) params.threshold = options.threshold;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("query_memory", params);
                 },
                 // 通过标题获取记忆
-                getByTitle: (title, chunkIndex, chunkRange, query, limit) => {
-                    const params = { title };
-                    if (chunkIndex !== undefined) params.chunk_index = chunkIndex;
-                    if (chunkRange) params.chunk_range = chunkRange;
-                    if (query) params.query = query;
-                    if (limit !== undefined) params.limit = limit;
+                getByTitle: (title, chunkIndex, chunkRange, query, limit, callerCardId) => {
+                    const options =
+                        title && typeof title === 'object' && !Array.isArray(title)
+                            ? title
+                            : {
+                                title,
+                                chunkIndex,
+                                chunkRange,
+                                query,
+                                limit,
+                                callerCardId
+                            };
+                    const params = { title: options.title };
+                    if (options.chunkIndex !== undefined) params.chunk_index = options.chunkIndex;
+                    if (options.chunkRange) params.chunk_range = options.chunkRange;
+                    if (options.query) params.query = options.query;
+                    if (options.limit !== undefined) params.limit = options.limit;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("get_memory_by_title", params);
                 },
                 // 创建记忆
-                create: (title, content, contentType, source, folderPath, tags) => {
-                    const params = { title, content };
-                    if (contentType) params.content_type = contentType;
-                    if (source) params.source = source;
-                    if (folderPath) params.folder_path = folderPath;
-                    if (tags) params.tags = tags;
+                create: (title, content, contentType, source, folderPath, tags, callerCardId) => {
+                    const options =
+                        title && typeof title === 'object' && !Array.isArray(title)
+                            ? title
+                            : {
+                                title,
+                                content,
+                                contentType,
+                                source,
+                                folderPath,
+                                tags,
+                                callerCardId
+                            };
+                    const params = { title: options.title, content: options.content };
+                    if (options.contentType) params.content_type = options.contentType;
+                    if (options.source) params.source = options.source;
+                    if (options.folderPath) params.folder_path = options.folderPath;
+                    if (options.tags) params.tags = options.tags;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("create_memory", params);
                 },
                 // 更新记忆
-                update: (oldTitle, updates = {}) => {
-                    const params = { old_title: oldTitle };
-                    if (updates.newTitle) params.new_title = updates.newTitle;
-                    if (updates.content) params.content = updates.content;
-                    if (updates.contentType) params.content_type = updates.contentType;
-                    if (updates.source) params.source = updates.source;
-                    if (updates.credibility !== undefined) params.credibility = updates.credibility;
-                    if (updates.importance !== undefined) params.importance = updates.importance;
-                    if (updates.folderPath) params.folder_path = updates.folderPath;
-                    if (updates.tags) params.tags = updates.tags;
+                update: (oldTitle, updates = {}, callerCardId) => {
+                    const options =
+                        oldTitle && typeof oldTitle === 'object' && !Array.isArray(oldTitle)
+                            ? oldTitle
+                            : { oldTitle, ...updates, callerCardId };
+                    const params = { old_title: options.oldTitle };
+                    if (options.newTitle) params.new_title = options.newTitle;
+                    if (options.content) params.content = options.content;
+                    if (options.contentType) params.content_type = options.contentType;
+                    if (options.source) params.source = options.source;
+                    if (options.credibility !== undefined) params.credibility = options.credibility;
+                    if (options.importance !== undefined) params.importance = options.importance;
+                    if (options.folderPath) params.folder_path = options.folderPath;
+                    if (options.tags) params.tags = options.tags;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("update_memory", params);
                 },
                 // 删除记忆
-                deleteMemory: (title) => toolCall("delete_memory", { title }),
+                deleteMemory: (title, callerCardId) => {
+                    const options =
+                        title && typeof title === 'object' && !Array.isArray(title)
+                            ? title
+                            : { title, callerCardId };
+                    const params = { title: options.title };
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
+                    return toolCall("delete_memory", params);
+                },
                 // 批量移动记忆（按标题列表和/或来源文件夹筛选）
-                move: (targetFolderPath, titles, sourceFolderPath) => {
-                    const params = { target_folder_path: targetFolderPath };
-                    if (titles) {
-                        params.titles = Array.isArray(titles) ? titles.join(",") : String(titles);
+                move: (targetFolderPath, titles, sourceFolderPath, callerCardId) => {
+                    const options =
+                        targetFolderPath && typeof targetFolderPath === 'object' && !Array.isArray(targetFolderPath)
+                            ? targetFolderPath
+                            : { targetFolderPath, titles, sourceFolderPath, callerCardId };
+                    const params = { target_folder_path: options.targetFolderPath };
+                    if (options.titles) {
+                        params.titles = Array.isArray(options.titles) ? options.titles.join(",") : String(options.titles);
                     }
-                    if (sourceFolderPath !== undefined && sourceFolderPath !== null) params.source_folder_path = String(sourceFolderPath);
+                    if (options.sourceFolderPath !== undefined && options.sourceFolderPath !== null) params.source_folder_path = String(options.sourceFolderPath);
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("move_memory", params);
                 },
                 // 链接记忆
-                link: (sourceTitle, targetTitle, linkType, weight, description) => {
-                    const params = { source_title: sourceTitle, target_title: targetTitle };
-                    if (linkType) params.link_type = linkType;
-                    if (weight !== undefined) params.weight = weight;
-                    if (description) params.description = description;
+                link: (sourceTitle, targetTitle, linkType, weight, description, callerCardId) => {
+                    const options =
+                        sourceTitle && typeof sourceTitle === 'object' && !Array.isArray(sourceTitle)
+                            ? sourceTitle
+                            : { sourceTitle, targetTitle, linkType, weight, description, callerCardId };
+                    const params = { source_title: options.sourceTitle, target_title: options.targetTitle };
+                    if (options.linkType) params.link_type = options.linkType;
+                    if (options.weight !== undefined) params.weight = options.weight;
+                    if (options.description) params.description = options.description;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("link_memories", params);
                 },
                 // 查询记忆链接
-                queryLinks: (linkId, sourceTitle, targetTitle, linkType, limit) => {
+                queryLinks: (linkId, sourceTitle, targetTitle, linkType, limit, callerCardId) => {
+                    const options =
+                        linkId && typeof linkId === 'object' && !Array.isArray(linkId)
+                            ? linkId
+                            : { linkId, sourceTitle, targetTitle, linkType, limit, callerCardId };
                     const params = {};
-                    if (linkId !== undefined && linkId !== null) params.link_id = linkId;
-                    if (sourceTitle) params.source_title = sourceTitle;
-                    if (targetTitle) params.target_title = targetTitle;
-                    if (linkType) params.link_type = linkType;
-                    if (limit !== undefined) params.limit = limit;
+                    if (options.linkId !== undefined && options.linkId !== null) params.link_id = options.linkId;
+                    if (options.sourceTitle) params.source_title = options.sourceTitle;
+                    if (options.targetTitle) params.target_title = options.targetTitle;
+                    if (options.linkType) params.link_type = options.linkType;
+                    if (options.limit !== undefined) params.limit = options.limit;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("query_memory_links", params);
                 },
                 // 更新记忆链接（优先按 linkId）
-                updateLink: (linkId, sourceTitle, targetTitle, linkType, newLinkType, weight, description) => {
+                updateLink: (linkId, sourceTitle, targetTitle, linkType, newLinkType, weight, description, callerCardId) => {
+                    const options =
+                        linkId && typeof linkId === 'object' && !Array.isArray(linkId)
+                            ? linkId
+                            : { linkId, sourceTitle, targetTitle, linkType, newLinkType, weight, description, callerCardId };
                     const params = {};
-                    if (linkId !== undefined && linkId !== null) params.link_id = linkId;
-                    if (sourceTitle) params.source_title = sourceTitle;
-                    if (targetTitle) params.target_title = targetTitle;
-                    if (linkType) params.link_type = linkType;
-                    if (newLinkType) params.new_link_type = newLinkType;
-                    if (weight !== undefined) params.weight = weight;
-                    if (description !== undefined) params.description = description;
+                    if (options.linkId !== undefined && options.linkId !== null) params.link_id = options.linkId;
+                    if (options.sourceTitle) params.source_title = options.sourceTitle;
+                    if (options.targetTitle) params.target_title = options.targetTitle;
+                    if (options.linkType) params.link_type = options.linkType;
+                    if (options.newLinkType) params.new_link_type = options.newLinkType;
+                    if (options.weight !== undefined) params.weight = options.weight;
+                    if (options.description !== undefined) params.description = options.description;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("update_memory_link", params);
                 },
                 // 删除记忆链接（优先按 linkId）
-                deleteLink: (linkId, sourceTitle, targetTitle, linkType) => {
+                deleteLink: (linkId, sourceTitle, targetTitle, linkType, callerCardId) => {
+                    const options =
+                        linkId && typeof linkId === 'object' && !Array.isArray(linkId)
+                            ? linkId
+                            : { linkId, sourceTitle, targetTitle, linkType, callerCardId };
                     const params = {};
-                    if (linkId !== undefined && linkId !== null) params.link_id = linkId;
-                    if (sourceTitle) params.source_title = sourceTitle;
-                    if (targetTitle) params.target_title = targetTitle;
-                    if (linkType) params.link_type = linkType;
+                    if (options.linkId !== undefined && options.linkId !== null) params.link_id = options.linkId;
+                    if (options.sourceTitle) params.source_title = options.sourceTitle;
+                    if (options.targetTitle) params.target_title = options.targetTitle;
+                    if (options.linkType) params.link_type = options.linkType;
+                    const normalizedCallerCardId = Tools.Memory._normalizeCallerCardId(options.callerCardId);
+                    if (normalizedCallerCardId !== undefined) params.caller_card_id = normalizedCallerCardId;
                     return toolCall("delete_memory_link", params);
                 }
             },
@@ -1116,6 +1468,7 @@ fun getJsToolsDefinition(): String {
                     if (chatId) params.chat_id = chatId;
                     if (roleCardId) params.role_card_id = roleCardId;
                     if (senderName) params.sender_name = senderName;
+                    if (options.runtime) params.runtime = String(options.runtime);
                     if (options.persist_turn !== undefined) params.persist_turn = options.persist_turn;
                     if (options.notify_reply !== undefined) params.notify_reply = options.notify_reply;
                     if (options.hide_user_message !== undefined) params.hide_user_message = options.hide_user_message;
@@ -1129,6 +1482,7 @@ fun getJsToolsDefinition(): String {
                     if (chatId) params.chat_id = chatId;
                     if (roleCardId) params.role_card_id = roleCardId;
                     if (senderName) params.sender_name = senderName;
+                    if (options.runtime) params.runtime = String(options.runtime);
                     if (options.persist_turn !== undefined) params.persist_turn = options.persist_turn;
                     if (options.notify_reply !== undefined) params.notify_reply = options.notify_reply;
                     if (options.hide_user_message !== undefined) params.hide_user_message = options.hide_user_message;

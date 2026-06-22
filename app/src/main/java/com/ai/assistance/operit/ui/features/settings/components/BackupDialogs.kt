@@ -1,14 +1,19 @@
 package com.ai.assistance.operit.ui.features.settings.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -71,7 +76,12 @@ fun MemoryImportStrategyDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.backup_memory_import_strategy_title)) },
         text = {
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = texts.question,
                     modifier = Modifier.padding(bottom = 16.dp)
@@ -173,8 +183,12 @@ fun ProfileSelectionDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column {
-                profiles.forEach { profile ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+            ) {
+                items(profiles, key = { it.id }) { profile ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -236,44 +250,58 @@ fun ExportFormatDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.backup_select_export_format)) },
         text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.backup_select_format_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+            ) {
+                item {
+                    Text(
+                        text = stringResource(R.string.backup_select_format_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
 
-                FormatOption(
-                    format = ExportFormat.JSON,
-                    title = stringResource(R.string.backup_format_json),
-                    description = stringResource(R.string.backup_format_json_desc),
-                    selected = selectedFormat == ExportFormat.JSON,
-                    onClick = { onFormatSelected(ExportFormat.JSON) }
-                )
+                item {
+                    FormatOption(
+                        format = ExportFormat.JSON,
+                        title = stringResource(R.string.backup_format_json),
+                        description = stringResource(R.string.backup_format_json_desc),
+                        selected = selectedFormat == ExportFormat.JSON,
+                        onClick = { onFormatSelected(ExportFormat.JSON) }
+                    )
+                }
 
-                FormatOption(
-                    format = ExportFormat.MARKDOWN,
-                    title = stringResource(R.string.backup_format_markdown),
-                    description = stringResource(R.string.backup_format_markdown_desc),
-                    selected = selectedFormat == ExportFormat.MARKDOWN,
-                    onClick = { onFormatSelected(ExportFormat.MARKDOWN) }
-                )
+                item {
+                    FormatOption(
+                        format = ExportFormat.MARKDOWN,
+                        title = stringResource(R.string.backup_format_markdown),
+                        description = stringResource(R.string.backup_format_markdown_desc),
+                        selected = selectedFormat == ExportFormat.MARKDOWN,
+                        onClick = { onFormatSelected(ExportFormat.MARKDOWN) }
+                    )
+                }
 
-                FormatOption(
-                    format = ExportFormat.HTML,
-                    title = stringResource(R.string.backup_format_html),
-                    description = stringResource(R.string.backup_format_html_desc),
-                    selected = selectedFormat == ExportFormat.HTML,
-                    onClick = { onFormatSelected(ExportFormat.HTML) }
-                )
+                item {
+                    FormatOption(
+                        format = ExportFormat.HTML,
+                        title = stringResource(R.string.backup_format_html),
+                        description = stringResource(R.string.backup_format_html_desc),
+                        selected = selectedFormat == ExportFormat.HTML,
+                        onClick = { onFormatSelected(ExportFormat.HTML) }
+                    )
+                }
 
-                FormatOption(
-                    format = ExportFormat.TXT,
-                    title = stringResource(R.string.backup_format_txt),
-                    description = stringResource(R.string.backup_format_txt_desc),
-                    selected = selectedFormat == ExportFormat.TXT,
-                    onClick = { onFormatSelected(ExportFormat.TXT) }
-                )
+                item {
+                    FormatOption(
+                        format = ExportFormat.TXT,
+                        title = stringResource(R.string.backup_format_txt),
+                        description = stringResource(R.string.backup_format_txt_desc),
+                        selected = selectedFormat == ExportFormat.TXT,
+                        onClick = { onFormatSelected(ExportFormat.TXT) }
+                    )
+                }
             }
         },
         confirmButton = {
@@ -300,52 +328,68 @@ fun ImportFormatDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.backup_select_import_format)) },
         text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.backup_import_format_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+            ) {
+                item {
+                    Text(
+                        text = stringResource(R.string.backup_import_format_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
 
-                ImportFormatOption(
-                    format = ChatFormat.OPERIT,
-                    title = stringResource(R.string.backup_format_operit),
-                    description = stringResource(R.string.backup_format_operit_desc),
-                    selected = selectedFormat == ChatFormat.OPERIT,
-                    onClick = { onFormatSelected(ChatFormat.OPERIT) }
-                )
+                item {
+                    ImportFormatOption(
+                        format = ChatFormat.OPERIT,
+                        title = stringResource(R.string.backup_format_operit),
+                        description = stringResource(R.string.backup_format_operit_desc),
+                        selected = selectedFormat == ChatFormat.OPERIT,
+                        onClick = { onFormatSelected(ChatFormat.OPERIT) }
+                    )
+                }
 
-                ImportFormatOption(
-                    format = ChatFormat.CHATGPT,
-                    title = stringResource(R.string.backup_format_chatgpt),
-                    description = stringResource(R.string.backup_format_chatgpt_desc),
-                    selected = selectedFormat == ChatFormat.CHATGPT,
-                    onClick = { onFormatSelected(ChatFormat.CHATGPT) }
-                )
+                item {
+                    ImportFormatOption(
+                        format = ChatFormat.CHATGPT,
+                        title = stringResource(R.string.backup_format_chatgpt),
+                        description = stringResource(R.string.backup_format_chatgpt_desc),
+                        selected = selectedFormat == ChatFormat.CHATGPT,
+                        onClick = { onFormatSelected(ChatFormat.CHATGPT) }
+                    )
+                }
 
-                ImportFormatOption(
-                    format = ChatFormat.CHATBOX,
-                    title = stringResource(R.string.backup_format_chatbox),
-                    description = stringResource(R.string.backup_format_chatbox_desc),
-                    selected = selectedFormat == ChatFormat.CHATBOX,
-                    onClick = { onFormatSelected(ChatFormat.CHATBOX) }
-                )
+                item {
+                    ImportFormatOption(
+                        format = ChatFormat.CHATBOX,
+                        title = stringResource(R.string.backup_format_chatbox),
+                        description = stringResource(R.string.backup_format_chatbox_desc),
+                        selected = selectedFormat == ChatFormat.CHATBOX,
+                        onClick = { onFormatSelected(ChatFormat.CHATBOX) }
+                    )
+                }
 
-                ImportFormatOption(
-                    format = ChatFormat.MARKDOWN,
-                    title = stringResource(R.string.backup_format_markdown),
-                    description = stringResource(R.string.backup_format_markdown_desc),
-                    selected = selectedFormat == ChatFormat.MARKDOWN,
-                    onClick = { onFormatSelected(ChatFormat.MARKDOWN) }
-                )
+                item {
+                    ImportFormatOption(
+                        format = ChatFormat.MARKDOWN,
+                        title = stringResource(R.string.backup_format_markdown),
+                        description = stringResource(R.string.backup_format_markdown_desc),
+                        selected = selectedFormat == ChatFormat.MARKDOWN,
+                        onClick = { onFormatSelected(ChatFormat.MARKDOWN) }
+                    )
+                }
 
-                ImportFormatOption(
-                    format = ChatFormat.GENERIC_JSON,
-                    title = stringResource(R.string.backup_format_generic_json),
-                    description = stringResource(R.string.backup_format_generic_json_desc),
-                    selected = selectedFormat == ChatFormat.GENERIC_JSON,
-                    onClick = { onFormatSelected(ChatFormat.GENERIC_JSON) }
-                )
+                item {
+                    ImportFormatOption(
+                        format = ChatFormat.GENERIC_JSON,
+                        title = stringResource(R.string.backup_format_generic_json),
+                        description = stringResource(R.string.backup_format_generic_json_desc),
+                        selected = selectedFormat == ChatFormat.GENERIC_JSON,
+                        onClick = { onFormatSelected(ChatFormat.GENERIC_JSON) }
+                    )
+                }
             }
         },
         confirmButton = {
@@ -486,7 +530,13 @@ fun ModelConfigExportWarningDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
                     text = stringResource(R.string.backup_model_config_warning_contains),
                     style = MaterialTheme.typography.bodyMedium,

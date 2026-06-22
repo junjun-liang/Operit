@@ -25,6 +25,8 @@ import {
  * Provides methods for managing chat conversations
  */
 export namespace Chat {
+    type Runtime = 'main' | 'floating';
+
     interface StartServiceOptions {
         initial_mode?: 'WINDOW' | 'BALL' | 'VOICE_BALL' | 'FULLSCREEN' | 'RESULT_DISPLAY' | 'SCREEN_OCR';
         auto_enter_voice_chat?: boolean;
@@ -34,6 +36,7 @@ export namespace Chat {
     }
 
     interface SendMessageOptions {
+        runtime?: Runtime;
         persist_turn?: boolean;
         notify_reply?: boolean;
         hide_user_message?: boolean;

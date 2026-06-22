@@ -126,7 +126,6 @@ fun <T> stream(block: suspend StreamCollector<T>.() -> Unit): Stream<T> = object
         } catch (e: Exception) {
             // 对于协程取消异常，这是正常流程，应当向上抛出以停止流
             if (e is kotlinx.coroutines.CancellationException) {
-                StreamLogger.d("stream", "构建器Stream收集被取消")
                 throw e
             }
             StreamLogger.e("stream", "构建器Stream收集出错", e)

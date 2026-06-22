@@ -9,6 +9,8 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.regex.Pattern
 
 /**
@@ -32,6 +34,8 @@ object AppLogger {
     private const val LOG_FILE_NAME = "operit.log"
     private const val PACKAGE_LOG_DIR_NAME = "packageLogs"
     private const val TOOLPKG_LOG_TAG = "ToolPkg"
+    private const val MAX_LOG_MESSAGE_CHARS = 12_000
+    private const val MAX_LOG_THROWABLE_CHARS = 24_000
 
     // Simple date formatter for log lines
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
@@ -68,6 +72,11 @@ object AppLogger {
 
     @Volatile
     private var boundContext: Context? = null
+    private val fileLogExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "OperitAppLogger").apply {
+            isDaemon = true
+        }
+    }
 
     @JvmStatic
     fun bindContext(context: Context) {
@@ -221,7 +230,7 @@ object AppLogger {
 
     @JvmStatic
     fun getStackTraceString(tr: Throwable): String {
-        return Log.getStackTraceString(tr)
+        return ThrowableTextFormatter.format(tr, MAX_LOG_THROWABLE_CHARS)
     }
 
     /**
@@ -250,10 +259,21 @@ object AppLogger {
 
     private fun writeToFile(priority: Int, tag: String, msg: String, tr: Throwable?) {
         if (!enableFileLogging) return
+        try {
+            fileLogExecutor.execute {
+                writeToFileSync(priority, tag, msg, tr)
+            }
+        } catch (_: RejectedExecutionException) {
+        }
+    }
 
+    private fun writeToFileSync(priority: Int, tag: String, msg: String, tr: Throwable?) {
+        if (!enableFileLogging) return
         val file = resolveLogFile() ?: return
 
         val time = dateFormat.format(Date())
+        val normalizedMessage = normalizeLogMessage(msg)
+        val throwableText = tr?.let { ThrowableTextFormatter.format(it, MAX_LOG_THROWABLE_CHARS) }
         val levelChar = when (priority) {
             VERBOSE -> 'V'
             DEBUG -> 'D'
@@ -271,10 +291,10 @@ object AppLogger {
             .append("/")
             .append(tag)
             .append(": ")
-            .append(msg)
+            .append(normalizedMessage)
 
-        if (tr != null) {
-            builder.append("\n").append(Log.getStackTraceString(tr))
+        if (throwableText != null) {
+            builder.append("\n").append(throwableText)
         }
 
         builder.append('\n')
@@ -289,8 +309,8 @@ object AppLogger {
 
         writeToPackageLogIfNeeded(
             tag = tag,
-            msg = msg,
-            tr = tr,
+            msg = normalizedMessage,
+            throwableText = throwableText,
             time = time,
             levelChar = levelChar
         )
@@ -299,7 +319,7 @@ object AppLogger {
     private fun writeToPackageLogIfNeeded(
         tag: String,
         msg: String,
-        tr: Throwable?,
+        throwableText: String?,
         time: String,
         levelChar: Char
     ) {
@@ -340,8 +360,8 @@ object AppLogger {
         builder
             .append(msg)
 
-        if (tr != null) {
-            builder.append("\n").append(Log.getStackTraceString(tr))
+        if (throwableText != null) {
+            builder.append("\n").append(throwableText)
         }
         builder.append('\n')
 
@@ -358,6 +378,10 @@ object AppLogger {
             return false
         }
         return true
+    }
+
+    private fun normalizeLogMessage(msg: String): String {
+        return ThrowableTextFormatter.truncateText(msg, MAX_LOG_MESSAGE_CHARS)
     }
 
     private fun extractFirstMatch(text: String, patterns: List<Pattern>): String? {

@@ -47,7 +47,7 @@ export function registerToolPkg(): boolean {
       zh: "一个更接近真实使用场景的小组件示例：桌面展示摘要，点击进入完整页面。",
       en: "A more realistic widget example: summary on the home screen, full page on tap.",
     },
-    icon: "Widgets",
+    icon: Icons.Widgets,
     order: 10,
   });
 

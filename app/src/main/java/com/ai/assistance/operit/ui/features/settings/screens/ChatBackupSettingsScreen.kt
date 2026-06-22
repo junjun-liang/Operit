@@ -988,6 +988,9 @@ fun ChatBackupSettingsScreen() {
                                                     RawSnapshotBackupManager.ExportProgress.ZIPPING_FILES ->
                                                         context.getString(R.string.backup_raw_snapshot_progress_zipping_files) + suffix
 
+                                                    RawSnapshotBackupManager.ExportProgress.ZIPPING_EXTERNAL_FILES ->
+                                                        context.getString(R.string.backup_raw_snapshot_progress_zipping_external_files) + suffix
+
                                                     RawSnapshotBackupManager.ExportProgress.ZIPPING_SHARED_PREFS ->
                                                         context.getString(R.string.backup_raw_snapshot_progress_zipping_shared_prefs)
 
@@ -1458,6 +1461,9 @@ fun ChatBackupSettingsScreen() {
 
                                                 RawSnapshotBackupManager.RestoreProgress.REPLACING_FILES ->
                                                     context.getString(R.string.backup_raw_snapshot_progress_replacing_files)
+
+                                                RawSnapshotBackupManager.RestoreProgress.REPLACING_EXTERNAL_FILES ->
+                                                    context.getString(R.string.backup_raw_snapshot_progress_replacing_external_files)
 
                                                 RawSnapshotBackupManager.RestoreProgress.REPLACING_SHARED_PREFS ->
                                                     context.getString(R.string.backup_raw_snapshot_progress_replacing_shared_prefs)

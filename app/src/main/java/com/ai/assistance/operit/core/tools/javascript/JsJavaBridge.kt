@@ -270,6 +270,24 @@ internal fun buildJavaClassBridgeDefinition(): String {
                 }
             }
 
+            function hasUsableJavaInstanceMarker(value) {
+                if (!value || typeof value !== 'object') {
+                    return false;
+                }
+                try {
+                    return (
+                        Object.prototype.hasOwnProperty.call(value, '__javaHandle') &&
+                        Object.prototype.hasOwnProperty.call(value, '__javaClass') &&
+                        typeof value.__javaHandle === 'string' &&
+                        typeof value.__javaClass === 'string' &&
+                        String(value.__javaHandle || '').trim().length > 0 &&
+                        String(value.__javaClass || '').trim().length > 0
+                    );
+                } catch (_error) {
+                    return false;
+                }
+            }
+
             function ensureJsInterfaceMarkerRegistered(marker) {
                 if (!marker || typeof marker !== 'object') {
                     throw new Error('js interface marker is required');
@@ -358,10 +376,7 @@ internal fun buildJavaClassBridgeDefinition(): String {
                 if (!value || typeof value !== 'object') {
                     return value;
                 }
-                if (
-                    Object.prototype.hasOwnProperty.call(value, '__javaHandle') &&
-                    Object.prototype.hasOwnProperty.call(value, '__javaClass')
-                ) {
+                if (hasUsableJavaInstanceMarker(value)) {
                     return {
                         __javaHandle: String(value.__javaHandle),
                         __javaClass: String(value.__javaClass)
@@ -397,10 +412,7 @@ internal fun buildJavaClassBridgeDefinition(): String {
                 if (!value || typeof value !== 'object') {
                     return value;
                 }
-                if (
-                    Object.prototype.hasOwnProperty.call(value, '__javaHandle') &&
-                    Object.prototype.hasOwnProperty.call(value, '__javaClass')
-                ) {
+                if (hasUsableJavaInstanceMarker(value)) {
                     return createInstanceProxy(
                         String(value.__javaClass),
                         String(value.__javaHandle)
@@ -482,9 +494,9 @@ internal fun buildJavaClassBridgeDefinition(): String {
 
                 if (!parsed || parsed.success !== true) {
                     var message =
-                        parsed && typeof parsed.error === 'string' && parsed.error.length > 0
-                            ? parsed.error
-                            : ('Bridge call failed: ' + methodName);
+                        parsed && typeof parsed.message === 'string' && parsed.message.length > 0
+                            ? parsed.message
+                            : '';
                     throw new Error(message);
                 }
 
@@ -1304,6 +1316,7 @@ internal fun buildJavaClassBridgeDefinition(): String {
                 globalThis.__operitJavaBridgeReleaseJsObject = function(jsObjectId) {
                     return releaseJsObject(jsObjectId);
                 };
+                globalThis.__operitJavaBridgeWrapValue = wrapValue;
             }
 
             if (typeof globalThis !== 'undefined') {

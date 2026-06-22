@@ -219,7 +219,10 @@ class ScriptExecutionReceiver : BroadcastReceiver() {
 
         try {
             val engine = JsEngine(context)
-            val parsedParams = parseParams(paramsJson)
+            val parsedParams =
+                parseParams(paramsJson).toMutableMap().apply {
+                    put("__operit_toolpkg_runtime_kind", "sandbox")
+                }
             val envOverrides = parseEnvFile(envFilePath)
             val result =
                 when (normalizedMode) {
@@ -239,13 +242,8 @@ class ScriptExecutionReceiver : BroadcastReceiver() {
                             executionListener = traceRecorder
                         )
                 }
-            val success = !result.toString().startsWith("Error:", ignoreCase = true)
-            val error =
-                if (success) {
-                    null
-                } else {
-                    result?.toString()?.removePrefix("Error:")?.trim().orEmpty()
-                }
+            val error = extractJsExecutionErrorMessage(result)
+            val success = error == null
             traceRecorder.writeTo(
                 resultFile,
                 traceRecorder.buildPayload(

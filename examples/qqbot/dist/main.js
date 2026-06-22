@@ -3,16 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.qqbotAutoReplyApplicationTerminate = exports.qqbotAutoReplyApplicationForeground = exports.qqbotAutoReplyApplicationCreate = exports.qqbotListenerApplicationForeground = exports.qqbotListenerApplicationCreate = void 0;
 exports.registerToolPkg = registerToolPkg;
 const index_ui_js_1 = __importDefault(require("./ui/qqbot_settings/index.ui.js"));
+require("./shared/qqbot_ipc");
 const qqbot_runtime_1 = require("./shared/qqbot_runtime");
-Object.defineProperty(exports, "qqbotListenerApplicationCreate", { enumerable: true, get: function () { return qqbot_runtime_1.onQQBotListenerApplicationCreate; } });
-Object.defineProperty(exports, "qqbotListenerApplicationForeground", { enumerable: true, get: function () { return qqbot_runtime_1.onQQBotListenerApplicationForeground; } });
 const qqbot_auto_reply_1 = require("./shared/qqbot_auto_reply");
-Object.defineProperty(exports, "qqbotAutoReplyApplicationCreate", { enumerable: true, get: function () { return qqbot_auto_reply_1.onQQBotAutoReplyApplicationCreate; } });
-Object.defineProperty(exports, "qqbotAutoReplyApplicationForeground", { enumerable: true, get: function () { return qqbot_auto_reply_1.onQQBotAutoReplyApplicationForeground; } });
-Object.defineProperty(exports, "qqbotAutoReplyApplicationTerminate", { enumerable: true, get: function () { return qqbot_auto_reply_1.onQQBotAutoReplyApplicationTerminate; } });
 function logQQBotStartup(message) {
     console.log(`[qqbot] ${message}`);
 }

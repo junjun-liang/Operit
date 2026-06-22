@@ -1,4 +1,5 @@
 import type { ComposeDslContext, ComposeNode } from "../../../../types/compose-dsl";
+import type { MaterialIconName } from "../../../../types/material-icons";
 import { resolveRemoteOperitSetupI18n, type RemoteOperitSetupI18n } from "../../i18n";
 
 const REMOTE_OPERIT_PACKAGE_NAME = "remote_operit";
@@ -329,37 +330,37 @@ export default function Screen(ctx: ComposeDslContext): ComposeNode {
 
   const statusConfigByStatus: Record<
     ConnectionCardStatus,
-    { text: string; containerColor: string; contentColor: string; icon: string }
+    { text: string; containerColor: string; contentColor: string; icon: MaterialIconName }
   > = {
     idle: {
       text: text.connectionStateIdle,
       containerColor: "surfaceVariant",
       contentColor: "onSurfaceVariant",
-      icon: "devices"
+      icon: Icons.Devices
     },
     checking: {
       text: text.connectionStateChecking,
       containerColor: "tertiaryContainer",
       contentColor: "onTertiaryContainer",
-      icon: "sync"
+      icon: Icons.Sync
     },
     notConfigured: {
       text: text.connectionStateNotConfigured,
       containerColor: "secondaryContainer",
       contentColor: "onSecondaryContainer",
-      icon: "settings"
+      icon: Icons.Settings
     },
     success: {
       text: text.connectionStateSuccess,
       containerColor: "primaryContainer",
       contentColor: "onPrimaryContainer",
-      icon: "checkCircle"
+      icon: Icons.CheckCircle
     },
     failed: {
       text: text.connectionStateFailed,
       containerColor: "errorContainer",
       contentColor: "onErrorContainer",
-      icon: "error"
+      icon: Icons.Error
     }
   };
 

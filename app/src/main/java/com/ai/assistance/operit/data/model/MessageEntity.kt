@@ -35,6 +35,7 @@ data class MessageEntity(
         val sentAt: Long = 0L,
         val outputDurationMs: Long = 0L,
         val waitDurationMs: Long = 0L,
+        val completedAt: Long = 0L,
         val displayMode: String = ChatMessageDisplayMode.NORMAL.name,
         val isFavorite: Boolean = false,
 ) {
@@ -54,6 +55,7 @@ data class MessageEntity(
             sentAt = sentAt,
             outputDurationMs = outputDurationMs,
             waitDurationMs = waitDurationMs,
+            completedAt = completedAt,
             displayMode =
                 runCatching { ChatMessageDisplayMode.valueOf(displayMode) }
                     .getOrDefault(ChatMessageDisplayMode.NORMAL),
@@ -86,6 +88,7 @@ data class MessageEntity(
                     sentAt = message.sentAt,
                     outputDurationMs = message.outputDurationMs,
                     waitDurationMs = message.waitDurationMs,
+                    completedAt = message.completedAt,
                     displayMode = message.displayMode.name,
                     isFavorite = message.isFavorite,
             )

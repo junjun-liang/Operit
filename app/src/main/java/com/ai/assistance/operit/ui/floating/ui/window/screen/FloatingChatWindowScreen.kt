@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,13 +82,18 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.rememberAsyncImagePainter
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
+import com.ai.assistance.operit.plugins.chatview.ChatViewEvent
+import com.ai.assistance.operit.plugins.chatview.ChatViewHookParams
+import com.ai.assistance.operit.plugins.chatview.ChatViewHookPluginRegistry
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.util.UUID
 
 /** 渲染悬浮窗的窗口模式界面 - 简化版 */
 @Composable
 fun FloatingChatWindowMode(floatContext: FloatContext) {
     val viewModel = rememberFloatingChatWindowModeViewModel(floatContext)
+    ReportFloatingChatViewEffect(floatContext)
 
     LaunchedEffect(
         floatContext.windowWidthState,
@@ -98,6 +104,54 @@ fun FloatingChatWindowMode(floatContext: FloatContext) {
     }
 
     FloatingChatWindowContent(floatContext, viewModel)
+}
+
+@Composable
+private fun ReportFloatingChatViewEffect(floatContext: FloatContext) {
+    val service = floatContext.chatService ?: return
+    val chatCore = remember(service) { service.getChatCore() }
+    val chatHistories = chatCore.chatHistories.collectAsState(initial = emptyList()).value
+    val currentChatId = chatCore.currentChatId.collectAsState(initial = null).value
+    val currentChat = remember(chatHistories, currentChatId) {
+        chatHistories.find { it.id == currentChatId }
+    }
+    val viewId = rememberSaveable { UUID.randomUUID().toString() }
+    val latestChatViewParams by rememberUpdatedState(
+        ChatViewHookParams(
+            context = service,
+            viewId = viewId,
+            chatId = currentChatId,
+            workspacePath = currentChat?.workspace,
+            workspaceEnv = currentChat?.workspaceEnv,
+            runtime = "floating",
+            title = currentChat?.title
+        )
+    )
+    var hasDispatchedOpen by remember(viewId) { mutableStateOf(false) }
+    LaunchedEffect(
+        viewId,
+        currentChatId,
+        currentChat?.workspace,
+        currentChat?.workspaceEnv,
+        currentChat?.title
+    ) {
+        val event =
+            if (hasDispatchedOpen) {
+                ChatViewEvent.VIEW_UPDATED
+            } else {
+                hasDispatchedOpen = true
+                ChatViewEvent.VIEW_OPENED
+            }
+        ChatViewHookPluginRegistry.dispatchAsync(event, latestChatViewParams)
+    }
+    DisposableEffect(viewId) {
+        onDispose {
+            ChatViewHookPluginRegistry.dispatchAsync(
+                ChatViewEvent.VIEW_CLOSED,
+                latestChatViewParams
+            )
+        }
+    }
 }
 
 /** 主窗口内容 */

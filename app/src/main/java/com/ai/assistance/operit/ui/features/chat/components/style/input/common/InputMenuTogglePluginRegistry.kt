@@ -25,8 +25,10 @@ object InputMenuToggleSlots {
 
 data class InputMenuToggleHookParams(
     val context: android.content.Context,
+    val chatId: String?,
     val featureStates: Map<String, Boolean>,
-    val onToggleFeature: (String) -> Unit
+    val onToggleFeature: (String) -> Unit,
+    val runtime: String? = null
 )
 
 data class InputMenuToggleDefinition(
@@ -35,6 +37,7 @@ data class InputMenuToggleDefinition(
     @StringRes val descriptionRes: Int = 0,
     val title: String? = null,
     val description: String? = null,
+    val icon: String? = null,
     val isChecked: Boolean,
     val isEnabled: Boolean = true,
     val slot: String? = null,

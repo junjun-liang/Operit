@@ -810,7 +810,7 @@ export default function Screen(ctx: ComposeDslContext): ComposeNode {
                                         }),
                                         ctx.UI.Row({ spacing: 1, verticalAlignment: "center" }, [
                                             ctx.UI.IconButton({
-                                                icon: "delete",
+                                                icon: Icons.Delete,
                                                 enabled: !busyState.value,
                                                 width: 26,
                                                 height: 26,
@@ -818,7 +818,7 @@ export default function Screen(ctx: ComposeDslContext): ComposeNode {
                                                 onClick: deleteTmuxTabAction
                                             }),
                                             ctx.UI.IconButton({
-                                                icon: "sync",
+                                                icon: Icons.Sync,
                                                 enabled: !busyState.value,
                                                 width: 26,
                                                 height: 26,
@@ -826,7 +826,7 @@ export default function Screen(ctx: ComposeDslContext): ComposeNode {
                                                 onClick: refreshTmuxTabsAction
                                             }),
                                             ctx.UI.IconButton({
-                                                icon: "add",
+                                                icon: Icons.Add,
                                                 enabled: !busyState.value,
                                                 width: 26,
                                                 height: 26,

@@ -12,6 +12,7 @@ import android.text.style.UnderlineSpan
 import com.ai.assistance.operit.util.AppLogger
 import android.util.LruCache
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
@@ -35,7 +36,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -50,10 +50,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnit.Companion.Unspecified
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.ai.assistance.operit.R
 import com.ai.assistance.operit.ui.common.displays.LatexCache
 import com.ai.assistance.operit.ui.theme.LocalAiMarkdownTextLayoutSettings
 import com.ai.assistance.operit.util.markdown.MarkdownNodeStable
@@ -337,7 +337,7 @@ private object LayoutCache {
 /**
  * 绘制指令 - 用于描述如何在 Canvas 上绘制内容
  */
-private sealed class DrawInstruction {
+internal sealed class DrawInstruction {
     data class Text(
         val text: String,
         val x: Float,
@@ -411,10 +411,11 @@ private fun extractAccessibleText(instructions: List<DrawInstruction>): String {
  * - 稳定化 lambda 参数，减少不必要的 recompose
  */
 @Composable
-fun CanvasMarkdownNodeRenderer(
+internal fun CanvasMarkdownNodeRenderer(
     nodeKey: String,
     node: MarkdownNodeStable,
     textColor: Color,
+    fontSize: TextUnit = Unspecified,
     modifier: Modifier = Modifier,
     onLinkClick: ((String) -> Unit)? = null,
     index: Int,
@@ -430,15 +431,28 @@ fun CanvasMarkdownNodeRenderer(
     // 缓存字体大小 - 避免每次 recompose 都从 MaterialTheme 读取
     // 只有当 MaterialTheme 真正变化时才会重新计算
     val typography = MaterialTheme.typography
-    val fontSizes = remember(typography) {
+    val fontSizes = remember(typography, fontSize) {
+        val defaultBodySize = typography.bodyMedium.fontSize
+        val scale =
+            if (
+                fontSize == Unspecified ||
+                    !defaultBodySize.value.isFinite() ||
+                    defaultBodySize.value <= 0f ||
+                    !fontSize.value.isFinite() ||
+                    fontSize.value <= 0f
+            ) {
+                1f
+            } else {
+                fontSize.value / defaultBodySize.value
+            }
         FontSizes(
-            bodyMedium = typography.bodyMedium.fontSize,
-            headlineLarge = typography.headlineLarge.fontSize,
-            headlineMedium = typography.headlineMedium.fontSize,
-            headlineSmall = typography.headlineSmall.fontSize,
-            titleLarge = typography.titleLarge.fontSize,
-            titleMedium = typography.titleMedium.fontSize,
-            titleSmall = typography.titleSmall.fontSize
+            bodyMedium = scaleMarkdownTextUnit(typography.bodyMedium.fontSize, scale),
+            headlineLarge = scaleMarkdownTextUnit(typography.headlineLarge.fontSize, scale),
+            headlineMedium = scaleMarkdownTextUnit(typography.headlineMedium.fontSize, scale),
+            headlineSmall = scaleMarkdownTextUnit(typography.headlineSmall.fontSize, scale),
+            titleLarge = scaleMarkdownTextUnit(typography.titleLarge.fontSize, scale),
+            titleMedium = scaleMarkdownTextUnit(typography.titleMedium.fontSize, scale),
+            titleSmall = scaleMarkdownTextUnit(typography.titleSmall.fontSize, scale)
         )
     }
     
@@ -484,6 +498,16 @@ private data class FontSizes(
     val titleMedium: TextUnit,
     val titleSmall: TextUnit
 )
+
+private fun scaleMarkdownTextUnit(
+    base: TextUnit,
+    scale: Float
+): TextUnit {
+    if (!scale.isFinite() || scale <= 0f || scale == 1f) {
+        return base
+    }
+    return (base.value * scale).sp
+}
 
 @Composable
 private fun renderNodeContent(
@@ -612,7 +636,7 @@ private fun renderNodeContent(
                     val quoteText = content.lines().joinToString("\n") {
                         it.removePrefix("> ").removePrefix(">")
                     }
-                    
+
                     SingleTextCanvas(
                         text = quoteText,
                         textColor = textColor,
@@ -1065,12 +1089,14 @@ private fun UnifiedCanvasRenderer(
                                         // 1. 绘制当前行之前的所有行
                                         canvas.nativeCanvas.save()
                                         canvas.nativeCanvas.clipRect(0f, 0f, layout.width.toFloat(), lineTopPx)
+                                        drawInlineCodeBackgrounds(layout, canvas.nativeCanvas)
                                         layout.draw(canvas.nativeCanvas)
                                         canvas.nativeCanvas.restore()
 
                                         // 2. 绘制当前行，直到当前正在显示的字符之前
                                         canvas.nativeCanvas.save()
                                         canvas.nativeCanvas.clipRect(0f, lineTopPx, charMinX, lineBottomPx)
+                                        drawInlineCodeBackgrounds(layout, canvas.nativeCanvas)
                                         layout.draw(canvas.nativeCanvas)
                                         canvas.nativeCanvas.restore()
 
@@ -1081,11 +1107,13 @@ private fun UnifiedCanvasRenderer(
                                             canvas.nativeCanvas.clipRect(charMinX, lineTopPx, visibleRight, lineBottomPx)
                                             // 注意：saveLayerAlpha 在某些情况下可能会对其包含的内容做混合，如果不需要可以简化
                                             canvas.nativeCanvas.saveLayerAlpha(charMinX, lineTopPx, visibleRight, lineBottomPx, alphaInt)
+                                            drawInlineCodeBackgrounds(layout, canvas.nativeCanvas)
                                             layout.draw(canvas.nativeCanvas)
                                             canvas.nativeCanvas.restore()
                                             canvas.nativeCanvas.restore()
                                         }
                                     } else {
+                                        drawInlineCodeBackgrounds(instruction.layout, canvas.nativeCanvas)
                                         instruction.layout.draw(canvas.nativeCanvas)
                                     }
                                     canvas.nativeCanvas.restore()
@@ -1262,7 +1290,14 @@ private fun calculateLayout(
             
             // 绘制标记
             val markerY = currentY + textSizePx
-            instructions.add(DrawInstruction.Text("$numberStr.", startPadding, markerY, boldPaint))
+            instructions.add(
+                DrawInstruction.Text(
+                    text = "$numberStr.",
+                    x = startPadding,
+                    y = markerY,
+                    paint = boldPaint,
+                )
+            )
             
             // 使用 StaticLayout 绘制内容（支持自动换行）
             val contentWidth = (safeAvailableWidthPx - contentX.toInt()).coerceAtLeast(1)
@@ -1300,7 +1335,14 @@ private fun calculateLayout(
                     lineSpacingMultiplier
                 )
             }
-            instructions.add(DrawInstruction.TextLayout(layout, contentX, currentY, layout.text))
+            instructions.add(
+                DrawInstruction.TextLayout(
+                    layout = layout,
+                    x = contentX,
+                    y = currentY,
+                    text = layout.text,
+                )
+            )
             currentY += layout.height
             maxWidth = maxOf(maxWidth, calculateActualWidth(layout, contentX, safeAvailableWidthPx))
             
@@ -1373,8 +1415,22 @@ private fun calculateLayout(
 
             // 使用首行真实基线定位圆点，避免不同字体/字重下出现垂直漂移
             val markerY = currentY + layout.getLineBaseline(0)
-            instructions.add(DrawInstruction.Text("•", startPadding, markerY, markerPaint))
-            instructions.add(DrawInstruction.TextLayout(layout, contentX, currentY, layout.text))
+            instructions.add(
+                DrawInstruction.Text(
+                    text = "•",
+                    x = startPadding,
+                    y = markerY,
+                    paint = markerPaint,
+                )
+            )
+            instructions.add(
+                DrawInstruction.TextLayout(
+                    layout = layout,
+                    x = contentX,
+                    y = currentY,
+                    text = layout.text,
+                )
+            )
             currentY += layout.height
             maxWidth = maxOf(maxWidth, calculateActualWidth(layout, contentX, safeAvailableWidthPx))
             
@@ -1468,7 +1524,7 @@ private fun calculateLayout(
                 currentY += 6f * density.density
             }
         }
-        
+
         else -> {
             // 其他类型暂不处理
         }
@@ -1579,6 +1635,7 @@ private fun SingleTextCanvas(
                     
                     // 判断是否在可见区域内
                     if (totalHeight >= clipBounds.top && 0f <= clipBounds.bottom) {
+                        drawInlineCodeBackgrounds(layout, canvas.nativeCanvas)
                         layout.draw(canvas.nativeCanvas)
                     }
                 }

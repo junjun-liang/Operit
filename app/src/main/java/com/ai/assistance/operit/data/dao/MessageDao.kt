@@ -30,6 +30,12 @@ interface MessageDao {
     @Query(
         """
         SELECT
+            (
+                SELECT COUNT(*)
+                FROM messages AS earlier
+                WHERE earlier.chatId = messages.chatId
+                    AND earlier.timestamp < messages.timestamp
+            ) AS messageIndex,
             timestamp AS timestamp,
             sender AS sender,
             CASE
@@ -49,6 +55,38 @@ interface MessageDao {
     )
     suspend fun getLocatorPreviewsForChat(
         chatId: String,
+        previewCharCount: Int,
+    ): List<ChatMessageLocatorPreview>
+
+    @Query(
+        """
+        SELECT
+            (
+                SELECT COUNT(*)
+                FROM messages AS earlier
+                WHERE earlier.chatId = messages.chatId
+                    AND earlier.timestamp < messages.timestamp
+            ) AS messageIndex,
+            timestamp AS timestamp,
+            sender AS sender,
+            SUBSTR(
+                content,
+                MAX(1, INSTR(LOWER(content), LOWER(:query)) - (:previewCharCount / 2)),
+                :previewCharCount
+            ) AS previewContent,
+            LENGTH(content) AS contentLength,
+            displayMode AS displayMode,
+            isFavorite AS isFavorite
+        FROM messages
+        WHERE chatId = :chatId
+            AND NOT (sender = 'user' AND displayMode = 'HIDDEN_PLACEHOLDER')
+            AND INSTR(LOWER(content), LOWER(:query)) > 0
+        ORDER BY timestamp ASC
+        """
+    )
+    suspend fun searchLocatorPreviewsForChat(
+        chatId: String,
+        query: String,
         previewCharCount: Int,
     ): List<ChatMessageLocatorPreview>
 
@@ -196,6 +234,7 @@ interface MessageDao {
             sentAt,
             outputDurationMs,
             waitDurationMs,
+            completedAt,
             displayMode,
             isFavorite
         )
@@ -215,6 +254,7 @@ interface MessageDao {
             sentAt,
             outputDurationMs,
             waitDurationMs,
+            completedAt,
             displayMode,
             isFavorite
         FROM messages

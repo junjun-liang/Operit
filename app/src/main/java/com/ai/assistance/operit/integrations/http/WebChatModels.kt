@@ -62,7 +62,9 @@ data class WebChatSummary(
     @SerialName("active_streaming")
     val activeStreaming: Boolean = false,
     @SerialName("locked")
-    val locked: Boolean = false
+    val locked: Boolean = false,
+    @SerialName("pinned")
+    val pinned: Boolean = false
 )
 
 @Serializable
@@ -173,6 +175,8 @@ data class WebChatMessagesPage(
 
 @Serializable
 data class WebChatMessageLocatorPreview(
+    @SerialName("message_index")
+    val messageIndex: Int? = null,
     @SerialName("timestamp")
     val timestamp: Long,
     @SerialName("sender")
@@ -383,6 +387,12 @@ data class WebDisplayPreferences(
     val showModelName: Boolean,
     @SerialName("show_model_provider")
     val showModelProvider: Boolean,
+    @SerialName("show_message_token_stats")
+    val showMessageTokenStats: Boolean,
+    @SerialName("show_message_timing_stats")
+    val showMessageTimingStats: Boolean,
+    @SerialName("show_message_timestamp")
+    val showMessageTimestamp: Boolean,
     @SerialName("tool_collapse_mode")
     val toolCollapseMode: String,
     @SerialName("global_user_name")
@@ -549,6 +559,10 @@ data class WebUpdateChatRequest(
     val locked: Boolean? = null,
     @SerialName("update_locked")
     val updateLocked: Boolean = false,
+    @SerialName("pinned")
+    val pinned: Boolean? = null,
+    @SerialName("update_pinned")
+    val updatePinned: Boolean = false,
     @SerialName("character_card_name")
     val characterCardName: String? = null,
     @SerialName("character_group_id")

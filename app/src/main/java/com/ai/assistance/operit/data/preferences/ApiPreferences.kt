@@ -4,10 +4,12 @@ import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ai.assistance.operit.data.model.ApiProviderType
@@ -74,13 +76,13 @@ class ApiPreferences private constructor(private val context: Context) {
 
         // 动态生成供应商:模型的Token键
         fun getTokenInputKey(providerModel: String) =
-                intPreferencesKey("token_input_${providerModel.replace(":", "_")}")
+                longPreferencesKey("token_input_${providerModel.replace(":", "_")}")
 
         fun getTokenCachedInputKey(providerModel: String) =
-                intPreferencesKey("token_cached_input_${providerModel.replace(":", "_")}")
+                longPreferencesKey("token_cached_input_${providerModel.replace(":", "_")}")
 
         fun getTokenOutputKey(providerModel: String) =
-                intPreferencesKey("token_output_${providerModel.replace(":", "_")}")
+                longPreferencesKey("token_output_${providerModel.replace(":", "_")}")
 
         // 模型定价键
         fun getModelInputPriceKey(providerModel: String) =
@@ -453,47 +455,53 @@ class ApiPreferences private constructor(private val context: Context) {
             val cachedInputKey = getTokenCachedInputKey(providerModel)
             val outputKey = getTokenOutputKey(providerModel)
 
-            val currentInputTokens = preferences[inputKey] ?: 0
-            val currentCachedInputTokens = preferences[cachedInputKey] ?: 0
-            val currentOutputTokens = preferences[outputKey] ?: 0
+            val currentInputTokens = readTokenCount(preferences, inputKey.name)
+            val currentCachedInputTokens = readTokenCount(preferences, cachedInputKey.name)
+            val currentOutputTokens = readTokenCount(preferences, outputKey.name)
 
-            preferences[inputKey] = currentInputTokens + inputTokens
-            preferences[cachedInputKey] = currentCachedInputTokens + cachedInputTokens
-            preferences[outputKey] = currentOutputTokens + outputTokens
+            removeTokenCountKeys(
+                    preferences,
+                    inputKey.name,
+                    cachedInputKey.name,
+                    outputKey.name
+            )
+            preferences[inputKey] = currentInputTokens + inputTokens.toLong()
+            preferences[cachedInputKey] = currentCachedInputTokens + cachedInputTokens.toLong()
+            preferences[outputKey] = currentOutputTokens + outputTokens.toLong()
         }
     }
 
     /**
      * 获取指定供应商:模型的输入token数量
      */
-    suspend fun getInputTokensForProviderModel(providerModel: String): Int {
+    suspend fun getInputTokensForProviderModel(providerModel: String): Long {
         val preferences = context.apiDataStore.data.first()
-        return preferences[getTokenInputKey(providerModel)] ?: 0
+        return readTokenCount(preferences, getTokenInputKey(providerModel).name)
     }
 
     /**
      * 获取指定供应商:模型的缓存输入token数量
      */
-    suspend fun getCachedInputTokensForProviderModel(providerModel: String): Int {
+    suspend fun getCachedInputTokensForProviderModel(providerModel: String): Long {
         val preferences = context.apiDataStore.data.first()
-        return preferences[getTokenCachedInputKey(providerModel)] ?: 0
+        return readTokenCount(preferences, getTokenCachedInputKey(providerModel).name)
     }
 
     /**
      * 获取指定供应商:模型的输出token数量
      */
-    suspend fun getOutputTokensForProviderModel(providerModel: String): Int {
+    suspend fun getOutputTokensForProviderModel(providerModel: String): Long {
         val preferences = context.apiDataStore.data.first()
-        return preferences[getTokenOutputKey(providerModel)] ?: 0
+        return readTokenCount(preferences, getTokenOutputKey(providerModel).name)
     }
 
     /**
      * 获取所有供应商:模型的token统计
      * @return Map<供应商:模型, Triple<输入tokens, 输出tokens, 缓存tokens>>
      */
-    suspend fun getAllProviderModelTokens(): Map<String, Triple<Int, Int, Int>> {
+    suspend fun getAllProviderModelTokens(): Map<String, Triple<Long, Long, Long>> {
         val preferences = context.apiDataStore.data.first()
-        val result = mutableMapOf<String, Triple<Int, Int, Int>>()
+        val result = mutableMapOf<String, Triple<Long, Long, Long>>()
         
         // 遍历所有preferences，查找token相关的key
         preferences.asMap().forEach { (key, value) ->
@@ -501,10 +509,11 @@ class ApiPreferences private constructor(private val context: Context) {
             if (keyName.startsWith("token_input_")) {
                 val providerModel =
                         decodeProviderModelFromKeySuffix(keyName.removePrefix("token_input_"))
-                val inputTokens = value as? Int ?: 0
-                val outputTokens = preferences[getTokenOutputKey(providerModel)] ?: 0
-                val cachedInputTokens = preferences[getTokenCachedInputKey(providerModel)] ?: 0
-                if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
+                val inputTokens = readTokenCountValue(value)
+                val outputTokens = readTokenCount(preferences, getTokenOutputKey(providerModel).name)
+                val cachedInputTokens =
+                        readTokenCount(preferences, getTokenCachedInputKey(providerModel).name)
+                if (inputTokens > 0L || outputTokens > 0L || cachedInputTokens > 0L) {
                     result[providerModel] = Triple(inputTokens, outputTokens, cachedInputTokens)
                 }
             }
@@ -517,9 +526,9 @@ class ApiPreferences private constructor(private val context: Context) {
      * 获取所有供应商:模型的token统计的Flow
      * @return Flow<Map<供应商:模型, Triple<输入tokens, 输出tokens, 缓存tokens>>>
      */
-    val allProviderModelTokensFlow: Flow<Map<String, Triple<Int, Int, Int>>> =
+    val allProviderModelTokensFlow: Flow<Map<String, Triple<Long, Long, Long>>> =
         context.apiDataStore.data.map { preferences ->
-            val result = mutableMapOf<String, Triple<Int, Int, Int>>()
+            val result = mutableMapOf<String, Triple<Long, Long, Long>>()
             
             // 遍历所有preferences，查找token相关的key
             preferences.asMap().forEach { (key, value) ->
@@ -527,10 +536,11 @@ class ApiPreferences private constructor(private val context: Context) {
                 if (keyName.startsWith("token_input_")) {
                     val providerModel =
                             decodeProviderModelFromKeySuffix(keyName.removePrefix("token_input_"))
-                    val inputTokens = value as? Int ?: 0
-                    val outputTokens = preferences[getTokenOutputKey(providerModel)] ?: 0
-                    val cachedInputTokens = preferences[getTokenCachedInputKey(providerModel)] ?: 0
-                    if (inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0) {
+                    val inputTokens = readTokenCountValue(value)
+                    val outputTokens = readTokenCount(preferences, getTokenOutputKey(providerModel).name)
+                    val cachedInputTokens =
+                            readTokenCount(preferences, getTokenCachedInputKey(providerModel).name)
+                    if (inputTokens > 0L || outputTokens > 0L || cachedInputTokens > 0L) {
                         result[providerModel] = Triple(inputTokens, outputTokens, cachedInputTokens)
                     }
                 }
@@ -572,10 +582,39 @@ class ApiPreferences private constructor(private val context: Context) {
     // 重置指定供应商:模型的token计数
     suspend fun resetProviderModelTokenCounts(providerModel: String) {
         context.apiDataStore.edit { preferences ->
-            preferences[getTokenInputKey(providerModel)] = 0
-            preferences[getTokenCachedInputKey(providerModel)] = 0
-            preferences[getTokenOutputKey(providerModel)] = 0
+            removeTokenCountKeys(
+                    preferences,
+                    getTokenInputKey(providerModel).name,
+                    getTokenCachedInputKey(providerModel).name,
+                    getTokenOutputKey(providerModel).name
+            )
+            preferences[getTokenInputKey(providerModel)] = 0L
+            preferences[getTokenCachedInputKey(providerModel)] = 0L
+            preferences[getTokenOutputKey(providerModel)] = 0L
             preferences[getRequestCountKey(providerModel)] = 0
+        }
+    }
+
+    private fun removeTokenCountKeys(preferences: MutablePreferences, vararg keyNames: String) {
+        val names = keyNames.toSet()
+        preferences.asMap().keys
+                .filter { it.name in names }
+                .forEach { preferences.remove(it) }
+    }
+
+    private fun readTokenCount(preferences: Preferences, keyName: String): Long {
+        val values = preferences.asMap().entries
+                .filter { it.key.name == keyName }
+                .map { it.value }
+        val value = values.firstOrNull { it is Long } ?: values.firstOrNull()
+        return readTokenCountValue(value)
+    }
+
+    private fun readTokenCountValue(value: Any?): Long {
+        return when (value) {
+            is Long -> value
+            is Int -> if (value < 0) value.toLong() and 0xFFFF_FFFFL else value.toLong()
+            else -> 0L
         }
     }
 

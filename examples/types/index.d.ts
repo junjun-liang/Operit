@@ -43,6 +43,8 @@ import {
     TerminalCommandResultData as _TerminalCommandResultData,
     TerminalStreamEventData as _TerminalStreamEventData,
     HiddenTerminalCommandResultData as _HiddenTerminalCommandResultData,
+    MusicPlaybackState as _MusicPlaybackState,
+    MusicPlaybackResultData as _MusicPlaybackResultData,
     CombinedOperationResultData as _CombinedOperationResultData,
     AutomationExecutionResultData as _AutomationExecutionResultData,
     FilePartContentData as _FilePartContentData,
@@ -78,6 +80,7 @@ import {
 import { Intent as AndroidIntent, IntentFlag as AndroidIntentFlag, IntentAction as AndroidIntentAction, IntentCategory as AndroidIntentCategory } from './android';
 import { UINode as UINodeClass, UI as UINamespace } from './ui';
 import { Android as AndroidClass } from './android';
+import type { MaterialIconsRegistry as MaterialIconsRegistryType } from './material-icons';
 import {
     ComposeDslContext as ComposeDslContextType,
     ComposeDslScreen as ComposeDslScreenType,
@@ -96,6 +99,7 @@ export * from './results';
 export * from './tool-types';
 export * from './java-bridge';
 export * from './toolpkg';
+export * from './material-icons';
 
 // Export compose-dsl definitions for toolpkg runtime modules
 export * from './compose-dsl';
@@ -147,10 +151,13 @@ declare global {
     const IntentCategory: typeof AndroidIntentCategory;
     const UINode: typeof UINodeClass;
     const Android: typeof AndroidClass;
+    const Icons: MaterialIconsRegistryType;
 
     // Make classes available as types too
     type UINode = UINodeClass;
     type Android = AndroidClass;
+    type MaterialIconName = MaterialIconNameType;
+    type MaterialIconsRegistry = MaterialIconsRegistryType;
     type ComposeDslContext = ComposeDslContextType;
     type ComposeDslScreen = ComposeDslScreenType;
     type ComposeNode = ComposeNodeType;
@@ -190,6 +197,8 @@ declare global {
     type TerminalCommandResultData = _TerminalCommandResultData;
     type TerminalStreamEventData = _TerminalStreamEventData;
     type HiddenTerminalCommandResultData = _HiddenTerminalCommandResultData;
+    type MusicPlaybackState = _MusicPlaybackState;
+    type MusicPlaybackResultData = _MusicPlaybackResultData;
     type CombinedOperationResultData = _CombinedOperationResultData;
     type AutomationExecutionResultData = _AutomationExecutionResultData;
     type FilePartContentData = _FilePartContentData;

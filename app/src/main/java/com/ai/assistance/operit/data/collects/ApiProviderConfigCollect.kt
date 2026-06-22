@@ -126,6 +126,11 @@ object ApiProviderConfigs {
             )
         ),
         ProviderApiConfig(
+            providerType = ApiProviderType.MIMO,
+            defaultModelName = "mimo-v2.5-pro",
+            defaultApiEndpoint = "https://api.xiaomimimo.com/v1/chat/completions"
+        ),
+        ProviderApiConfig(
             providerType = ApiProviderType.MISTRAL,
             defaultModelName = "codestral-latest",
             defaultApiEndpoint = "https://codestral.mistral.ai/v1/chat/completions"

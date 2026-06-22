@@ -24,5 +24,6 @@ data class ChatHistory(
     val parentChatId: String? = null,
     val characterCardName: String? = null,
     val characterGroupId: String? = null,
-    val locked: Boolean = false
+    val locked: Boolean = false,
+    val pinned: Boolean = false
 )

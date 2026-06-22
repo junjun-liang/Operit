@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
@@ -116,7 +118,9 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Brush
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -255,12 +259,12 @@ private fun HistoryQuickScroller(
     val visibleFraction =
         (viewportHeightPx / estimatedContentHeightPx).coerceIn(0.12f, 1f)
     val thumbHeightPx =
-        if (trackHeightPx <= 0f) {
-            minThumbHeight
-        } else {
-            (trackHeightPx * visibleFraction).coerceIn(minThumbHeight, trackHeightPx)
+        when {
+            trackHeightPx <= 0f -> minThumbHeight
+            trackHeightPx <= minThumbHeight -> trackHeightPx
+            else -> (trackHeightPx * visibleFraction).coerceIn(minThumbHeight, trackHeightPx)
         }
-    val maxThumbOffsetPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
+    val maxThumbOffsetPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
     val thumbOffsetPx = maxThumbOffsetPx * scrollProgress
     val thumbHeightDp = with(density) { thumbHeightPx.toDp() }
     val thumbOffsetDp = with(density) { thumbOffsetPx.toDp() }
@@ -847,6 +851,7 @@ fun ChatHistorySelector(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 560.dp)
                     .padding(16.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
@@ -857,7 +862,9 @@ fun ChatHistorySelector(
                 )
             ) {
                 Column(
-                    modifier = Modifier.padding(vertical = 16.dp),
+                    modifier = Modifier
+                        .padding(vertical = 16.dp)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -1008,6 +1015,54 @@ fun ChatHistorySelector(
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(
                                 stringResource(R.string.move_down), 
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clearAndSetSemantics {}
+                            )
+                        }
+                    }
+
+                    // 置顶/取消置顶选项
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .semantics {
+                                contentDescription =
+                                    if (resolvedTargetChat?.pinned == true) {
+                                        context.getString(R.string.unpin_chat)
+                                    } else {
+                                        context.getString(R.string.pin_chat)
+                                    }
+                            }
+                            .clickable {
+                                val targetChat = resolvedTargetChat!!
+                                val newPinned = !targetChat.pinned
+                                coroutineScope.launch {
+                                    chatHistoryManager.updateChatPinned(targetChat.id, newPinned)
+                                }
+                                chatItemActionTarget = null
+                            },
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clearAndSetSemantics {}
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = if (resolvedTargetChat?.pinned == true) stringResource(R.string.unpin_chat) else stringResource(R.string.pin_chat),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clearAndSetSemantics {}
@@ -2392,6 +2447,15 @@ fun ChatHistorySelector(
                                                                 modifier = Modifier.size(12.dp),
                                                                 strokeWidth = 1.5.dp,
                                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                            )
+                                                        }
+                                                        if (item.history.pinned) {
+                                                            Spacer(modifier = Modifier.width(8.dp))
+                                                            Icon(
+                                                                imageVector = Icons.Default.PushPin,
+                                                                contentDescription = null,
+                                                                tint = contentColor.copy(alpha = 0.6f),
+                                                                modifier = Modifier.size(16.dp)
                                                             )
                                                         }
                                                         if (item.history.locked) {

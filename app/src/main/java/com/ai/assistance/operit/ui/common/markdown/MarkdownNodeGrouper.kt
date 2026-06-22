@@ -3,6 +3,7 @@ package com.ai.assistance.operit.ui.common.markdown
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
 import com.ai.assistance.operit.util.markdown.MarkdownNodeStable
 import com.ai.assistance.operit.util.stream.Stream
 
@@ -31,7 +32,8 @@ interface MarkdownNodeGrouper {
         onLinkClick: ((String) -> Unit)?,
         xmlRenderer: XmlContentRenderer,
         xmlStreamResolver: (Int) -> Stream<String>?,
-        fillMaxWidth: Boolean
+        fillMaxWidth: Boolean,
+        fontSize: TextUnit
     )
 }
 
@@ -52,7 +54,8 @@ object NoopMarkdownNodeGrouper : MarkdownNodeGrouper {
         onLinkClick: ((String) -> Unit)?,
         xmlRenderer: XmlContentRenderer,
         xmlStreamResolver: (Int) -> Stream<String>?,
-        fillMaxWidth: Boolean
+        fillMaxWidth: Boolean,
+        fontSize: TextUnit
     ) {
     }
 }

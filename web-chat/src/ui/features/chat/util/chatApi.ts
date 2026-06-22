@@ -226,10 +226,17 @@ export async function getMessages(
 
 export async function getMessageLocatorEntries(
   token: string,
-  chatId: string
+  chatId: string,
+  query = ''
 ): Promise<WebChatMessageLocatorPreview[]> {
+  const params = new URLSearchParams();
+  const normalizedQuery = query.trim();
+  if (normalizedQuery) {
+    params.set('query', normalizedQuery);
+  }
+  const queryString = params.toString();
   return requestJson<WebChatMessageLocatorPreview[]>(
-    `/api/web/chats/${encodeURIComponent(chatId)}/message-locator`,
+    `/api/web/chats/${encodeURIComponent(chatId)}/message-locator${queryString ? `?${queryString}` : ''}`,
     token
   );
 }

@@ -5,8 +5,11 @@
 import {
     StringResultData, SleepResultData, SystemSettingData, AppOperationData, AppListData,
     AppUsageTimeResultData, DeviceInfoResultData, NotificationData, LocationData,
+    BluetoothStateData, BluetoothBondedDevicesData, BluetoothScanResultData, BluetoothSessionData,
+    BluetoothTransferData, BluetoothReadData, BluetoothBleServicesData, BluetoothBleNotificationData,
     ADBResultData, IntentResultData, TerminalCommandResultData, TerminalStreamEventData, HiddenTerminalCommandResultData,
-    TerminalSessionCreationResultData, TerminalSessionCloseResultData, TerminalSessionScreenResultData
+    TerminalSessionCreationResultData, TerminalSessionCloseResultData, TerminalSessionScreenResultData,
+    MusicPlaybackResultData
 } from './results';
 
 /**
@@ -118,6 +121,114 @@ export namespace System {
     function getLocation(highAccuracy?: boolean, timeout?: number): Promise<LocationData>;
 
     /**
+     * Bluetooth operations.
+     */
+    namespace bluetooth {
+        /** Request Bluetooth nearby devices permission. */
+        function requestPermission(): Promise<StringResultData>;
+
+        /** Get Bluetooth adapter state. */
+        function getState(): Promise<BluetoothStateData>;
+
+        /** Open the system dialog to enable Bluetooth. */
+        function requestEnable(): Promise<StringResultData>;
+
+        /** List bonded Bluetooth devices. */
+        function listBondedDevices(): Promise<BluetoothBondedDevicesData>;
+
+        /** Scan nearby Bluetooth classic and BLE devices. */
+        function scan(options?: {
+            durationMs?: number | string;
+            includeBle?: boolean;
+        }): Promise<BluetoothScanResultData>;
+
+        /** Connect to a Bluetooth classic device. */
+        function connect(options: {
+            address: string;
+            uuid?: string;
+        }): Promise<BluetoothSessionData>;
+
+        /** Listen for another device connecting to this phone over Bluetooth classic. */
+        function listen(options?: {
+            name?: string;
+            uuid?: string;
+        }): Promise<BluetoothSessionData>;
+
+        /** Accept one incoming Bluetooth classic connection. */
+        function accept(listenerSessionId: string, timeoutMs?: number | string): Promise<BluetoothSessionData>;
+
+        /** Send text or bytes to a Bluetooth classic session. */
+        function send(sessionId: string, options: {
+            text?: string;
+            dataBase64?: string;
+        }): Promise<BluetoothTransferData>;
+
+        /** Read text or bytes from a Bluetooth classic session. */
+        function read(sessionId: string, options?: {
+            maxBytes?: number | string;
+            timeoutMs?: number | string;
+        }): Promise<BluetoothReadData>;
+
+        /** Send text or bytes and read the response from a Bluetooth classic session. */
+        function sendAndRead(sessionId: string, options: {
+            text?: string;
+            dataBase64?: string;
+            maxBytes?: number | string;
+            timeoutMs?: number | string;
+        }): Promise<BluetoothReadData>;
+
+        /** Close a Bluetooth classic, listener, or BLE session. */
+        function close(sessionId: string): Promise<StringResultData>;
+
+        namespace ble {
+            /** Connect to a BLE device. */
+            function connect(options: {
+                address: string;
+                autoConnect?: boolean;
+            }): Promise<BluetoothSessionData>;
+
+            /** Discover BLE services and characteristics. */
+            function discoverServices(sessionId: string, timeoutMs?: number | string): Promise<BluetoothBleServicesData>;
+
+            /** Read a BLE characteristic. */
+            function readCharacteristic(sessionId: string, options: {
+                serviceUuid: string;
+                characteristicUuid: string;
+                timeoutMs?: number | string;
+            }): Promise<BluetoothReadData>;
+
+            /** Write text or bytes to a BLE characteristic. */
+            function writeCharacteristic(sessionId: string, options: {
+                serviceUuid: string;
+                characteristicUuid: string;
+                text?: string;
+                dataBase64?: string;
+            }): Promise<BluetoothTransferData>;
+
+            /** Write text or bytes to one BLE characteristic and read another characteristic response. */
+            function writeAndReadCharacteristic(sessionId: string, options: {
+                writeServiceUuid: string;
+                writeCharacteristicUuid: string;
+                readServiceUuid: string;
+                readCharacteristicUuid: string;
+                text?: string;
+                dataBase64?: string;
+                timeoutMs?: number | string;
+            }): Promise<BluetoothReadData>;
+
+            /** Subscribe or unsubscribe BLE characteristic notifications. */
+            function subscribe(sessionId: string, options: {
+                serviceUuid: string;
+                characteristicUuid: string;
+                enable?: boolean;
+            }): Promise<BluetoothTransferData>;
+
+            /** Read received BLE notifications. */
+            function readNotifications(sessionId: string, limit?: number | string): Promise<BluetoothBleNotificationData>;
+        }
+    }
+
+    /**
      * Execute an shell command (requires root access)
      * @param command The shell command to execute
      */
@@ -168,7 +279,7 @@ export namespace System {
          * @param sessionId The ID of the session.
          * @param command The command to execute.
          * @param timeoutMs Optional timeout in milliseconds. Strongly recommended to always pass explicitly.
-         * @returns Promise resolving to the command execution result.
+         * @returns Promise resolving to the command execution result. On timeout, the promise still resolves and the returned result has `timedOut === true`.
          */
         function exec(sessionId: string, command: string, timeoutMs?: number | string): Promise<TerminalCommandResultData>;
 
@@ -190,7 +301,7 @@ export namespace System {
          * Commands using the same executorKey reuse the same hidden login context and are not shown in the visible terminal UI.
          * @param command The command to execute.
          * @param options Optional hidden executor options.
-         * @returns Promise resolving to the hidden command execution result.
+         * @returns Promise resolving to the hidden command execution result. On timeout, the promise still resolves and the returned result has `timedOut === true`.
          */
         function hiddenExec(command: string, options?: {
             executorKey?: string;
@@ -225,5 +336,65 @@ export namespace System {
             input?: string;
             control?: string;
         }): Promise<StringResultData>;
+    }
+
+    /**
+     * App music playback operations.
+     */
+    namespace music {
+        /**
+         * Play audio inside the app.
+         * @param options Playback options
+         */
+        function play(options: {
+            source: string;
+            sourceType: 'path' | 'url' | 'uri';
+            title?: string;
+            artist?: string;
+            loop?: boolean;
+            volume?: number | string;
+            startPositionMs?: number | string;
+        }): Promise<MusicPlaybackResultData>;
+
+        /**
+         * Play an audio queue inside the app.
+         * @param options Queue playback options
+         */
+        function playQueue(options: {
+            items: Array<{
+                source: string;
+                sourceType: 'path' | 'url' | 'uri';
+                title?: string;
+                artist?: string;
+            }>;
+            loop?: boolean;
+            volume?: number | string;
+            startIndex?: number | string;
+            startPositionMs?: number | string;
+        }): Promise<MusicPlaybackResultData>;
+
+        /** Pause current music playback. */
+        function pause(): Promise<MusicPlaybackResultData>;
+
+        /** Resume current music playback. */
+        function resume(): Promise<MusicPlaybackResultData>;
+
+        /** Stop current music playback. */
+        function stop(): Promise<MusicPlaybackResultData>;
+
+        /**
+         * Seek current music playback.
+         * @param positionMs Target position in milliseconds
+         */
+        function seek(positionMs: number | string): Promise<MusicPlaybackResultData>;
+
+        /**
+         * Set playback volume.
+         * @param volume Volume from 0 to 1
+         */
+        function setVolume(volume: number | string): Promise<MusicPlaybackResultData>;
+
+        /** Get current music playback status. */
+        function status(): Promise<MusicPlaybackResultData>;
     }
 }

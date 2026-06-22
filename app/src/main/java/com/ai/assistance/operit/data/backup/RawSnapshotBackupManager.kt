@@ -40,6 +40,7 @@ object RawSnapshotBackupManager {
     private const val ENTRY_PAYLOAD_PREFIX = "payload/"
 
     private const val ENTRY_FILES = "payload/files/"
+    private const val ENTRY_EXTERNAL_FILES = "payload/external_files/"
     private const val ENTRY_SHARED_PREFS = "payload/shared_prefs/"
     private const val ENTRY_DATASTORE = "payload/datastore/"
     private const val ENTRY_DATABASES = "payload/databases/"
@@ -66,6 +67,7 @@ object RawSnapshotBackupManager {
         PREPARING,
         SCANNING_FILES,
         ZIPPING_FILES,
+        ZIPPING_EXTERNAL_FILES,
         ZIPPING_SHARED_PREFS,
         ZIPPING_DATASTORE,
         ZIPPING_DATABASES,
@@ -83,6 +85,7 @@ object RawSnapshotBackupManager {
         READING_ZIP,
         EXTRACTING,
         REPLACING_FILES,
+        REPLACING_EXTERNAL_FILES,
         REPLACING_SHARED_PREFS,
         REPLACING_DATASTORE,
         REPLACING_DATABASES,
@@ -114,6 +117,9 @@ object RawSnapshotBackupManager {
             }
 
             val dataDir = context.dataDir
+            val externalFilesDir = requireNotNull(context.getExternalFilesDir(null)) {
+                "External files dir is unavailable"
+            }
             val sharedPrefsDir = File(dataDir, "shared_prefs")
             val datastoreDir = File(dataDir, "datastore")
             val databasesDir = File(dataDir, "databases")
@@ -125,7 +131,13 @@ object RawSnapshotBackupManager {
                 AppLogger.w(TAG, "wal_checkpoint failed", e)
             }
 
-            val includes = listOf(ENTRY_FILES, ENTRY_SHARED_PREFS, ENTRY_DATASTORE, ENTRY_DATABASES)
+            val includes = listOf(
+                ENTRY_FILES,
+                ENTRY_EXTERNAL_FILES,
+                ENTRY_SHARED_PREFS,
+                ENTRY_DATASTORE,
+                ENTRY_DATABASES
+            )
             val manifest = Manifest(
                 formatVersion = FORMAT_VERSION,
                 packageName = context.packageName,
@@ -186,6 +198,36 @@ object RawSnapshotBackupManager {
                 }
                 withContext(Dispatchers.Main) { onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_FILES, 100)) }
                 AppLogger.i(TAG, "export add files done in ${filesMs}ms (excludedTopLevel=${excludedNames.size})")
+
+                val externalFilesTotalCount = totalFilesForZip(
+                    dir = externalFilesDir,
+                    entryPrefix = ENTRY_EXTERNAL_FILES,
+                    excludedTopLevelDirNames = emptySet()
+                )
+                withContext(Dispatchers.Main) {
+                    onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_EXTERNAL_FILES, 0))
+                }
+                val externalFilesMs = measureTimeMillis {
+                    addDirToZip(
+                        zos = zos,
+                        dir = externalFilesDir,
+                        entryPrefix = ENTRY_EXTERNAL_FILES,
+                        totalFiles = externalFilesTotalCount,
+                        onPercentChanged = { percent ->
+                            if (onProgress != null) {
+                                mainHandler.post {
+                                    onProgress.invoke(
+                                        ExportProgressInfo(ExportProgress.ZIPPING_EXTERNAL_FILES, percent)
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+                withContext(Dispatchers.Main) {
+                    onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_EXTERNAL_FILES, 100))
+                }
+                AppLogger.i(TAG, "export add external_files done in ${externalFilesMs}ms")
 
                 withContext(Dispatchers.Main) { onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_SHARED_PREFS)) }
                 val sharedPrefsMs = measureTimeMillis { addDirToZip(zos, sharedPrefsDir, ENTRY_SHARED_PREFS) }
@@ -248,6 +290,7 @@ object RawSnapshotBackupManager {
                 val manifest = extractZipToWorkDir(cacheZip, workDir, expectedPackageName = context.packageName)
 
                 val payloadDir = File(workDir, "payload")
+                val externalFilesPayloadDir = File(payloadDir, "external_files")
 
                 val alwaysExcluded = OperitPaths.rawSnapshotExcludedFilesTopLevelDirNames()
 
@@ -267,6 +310,13 @@ object RawSnapshotBackupManager {
 
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_FILES) }
                 replaceDirContents(File(payloadDir, "files"), context.filesDir, preservedTopLevelDirNames = preservedNames)
+                if (externalFilesPayloadDir.exists()) {
+                    val externalFilesDir = requireNotNull(context.getExternalFilesDir(null)) {
+                        "External files dir is unavailable"
+                    }
+                    withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_EXTERNAL_FILES) }
+                    replaceDirContents(externalFilesPayloadDir, externalFilesDir)
+                }
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_SHARED_PREFS) }
                 replaceDirContents(File(payloadDir, "shared_prefs"), File(context.dataDir, "shared_prefs"))
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_DATASTORE) }

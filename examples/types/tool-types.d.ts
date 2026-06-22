@@ -9,9 +9,11 @@ import {
     FindFilesResultData, FileInfoData, FileConversionResultData, FileFormatConversionsResultData,
     HttpResponseData, VisitWebResultData,
     SleepResultData, StringResultData, SystemSettingData, AppOperationData, AppListData,
-    DeviceInfoResultData, NotificationData, LocationData,
+    DeviceInfoResultData, NotificationData, LocationData, BluetoothStateData, BluetoothBondedDevicesData,
+    BluetoothScanResultData, BluetoothSessionData, BluetoothTransferData, BluetoothReadData,
+    BluetoothBleServicesData, BluetoothBleNotificationData,
     UIPageResultData, UIActionResultData, CombinedOperationResultData, AutomationExecutionResultData,
-    CalculationResultData, FFmpegResultData, ADBResultData, IntentResultData, TerminalCommandResultData, HiddenTerminalCommandResultData, TerminalSessionScreenResultData,
+    CalculationResultData, FFmpegResultData, ADBResultData, IntentResultData, TerminalCommandResultData, HiddenTerminalCommandResultData, TerminalSessionScreenResultData, MusicPlaybackResultData,
     FilePartContentData, FileApplyResultData, WorkflowListResultData, WorkflowResultData, WorkflowDetailResultData,
     StringResultData, ChatServiceStartResultData, ChatCreationResultData, ChatListResultData, ChatFindResultData, AgentStatusResultData,
     ChatSwitchResultData, ChatTitleUpdateResultData, ChatDeleteResultData, MessageSendResultData, MemoryQueryResultData, MemoryLinkResultData, MemoryLinkQueryResultData, GrepResultData,
@@ -52,6 +54,8 @@ export interface ToolResultMap {
     'share_file': FileOperationData;
     'download_file': FileOperationData;
     'apply_file': FileApplyResultData;
+    'create_file': FileApplyResultData;
+    'edit_file': FileApplyResultData;
 
     // Network operations
     'http_request': HttpResponseData;
@@ -95,6 +99,25 @@ export interface ToolResultMap {
     'device_info': DeviceInfoResultData;
     'get_notifications': NotificationData;
     'get_device_location': LocationData;
+    'request_bluetooth_permission': StringResultData;
+    'get_bluetooth_state': BluetoothStateData;
+    'request_enable_bluetooth': StringResultData;
+    'list_bluetooth_bonded_devices': BluetoothBondedDevicesData;
+    'scan_bluetooth_devices': BluetoothScanResultData;
+    'bluetooth_connect': BluetoothSessionData;
+    'bluetooth_listen': BluetoothSessionData;
+    'bluetooth_accept': BluetoothSessionData;
+    'bluetooth_send': BluetoothTransferData;
+    'bluetooth_read': BluetoothReadData;
+    'bluetooth_send_and_read': BluetoothReadData;
+    'bluetooth_close': StringResultData;
+    'bluetooth_ble_connect': BluetoothSessionData;
+    'bluetooth_ble_discover_services': BluetoothBleServicesData;
+    'bluetooth_ble_read_characteristic': BluetoothReadData;
+    'bluetooth_ble_write_characteristic': BluetoothTransferData;
+    'bluetooth_ble_write_and_read_characteristic': BluetoothReadData;
+    'bluetooth_ble_subscribe_characteristic': BluetoothTransferData;
+    'bluetooth_ble_read_notifications': BluetoothBleNotificationData;
     'read_environment_variable': EnvironmentVariableReadResultData;
     'write_environment_variable': EnvironmentVariableWriteResultData;
     'list_sandbox_packages': SandboxPackagesResultData;
@@ -147,6 +170,16 @@ export interface ToolResultMap {
     'execute_in_terminal_session_streaming': TerminalCommandResultData;
     'execute_hidden_terminal_command': HiddenTerminalCommandResultData;
     'get_terminal_session_screen': TerminalSessionScreenResultData;
+
+    // Music playback operations
+    'music_play': MusicPlaybackResultData;
+    'music_play_queue': MusicPlaybackResultData;
+    'music_pause': MusicPlaybackResultData;
+    'music_resume': MusicPlaybackResultData;
+    'music_stop': MusicPlaybackResultData;
+    'music_seek': MusicPlaybackResultData;
+    'music_set_volume': MusicPlaybackResultData;
+    'music_status': MusicPlaybackResultData;
 
     // Workflow operations
     'get_all_workflows': WorkflowListResultData;

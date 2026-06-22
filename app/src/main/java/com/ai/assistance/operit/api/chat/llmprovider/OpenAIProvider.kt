@@ -15,6 +15,7 @@ import com.ai.assistance.operit.api.chat.llmprovider.EndpointCompleter
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.ChatUtils
+import com.ai.assistance.operit.util.HttpLogSanitizer
 import com.ai.assistance.operit.util.LocaleUtils
 import com.ai.assistance.operit.util.StreamingJsonXmlConverter
 import com.ai.assistance.operit.util.TokenCacheManager
@@ -193,6 +194,15 @@ open class OpenAIProvider(
         messagesArray: JSONArray,
         toolsJson: String?
     ) {
+    }
+
+    protected open fun applyAuthenticationHeaders(
+        builder: Request.Builder,
+        currentApiKey: String
+    ) {
+        if (currentApiKey.isNotEmpty()) {
+            builder.addHeader("Authorization", "Bearer $currentApiKey")
+        }
     }
 
      override fun cancelStreaming() {
@@ -706,6 +716,32 @@ open class OpenAIProvider(
         )
     }
 
+    protected fun calculateAndStoreInputTokens(
+        providerReadyHistory: List<PromptTurn>,
+        toolsJson: String? = null,
+        preserveThinkInHistory: Boolean = false
+    ): Int {
+        val comparableHistory = buildComparableHistory(providerReadyHistory, preserveThinkInHistory)
+        return tokenCacheManager.calculateInputTokens(comparableHistory, toolsJson)
+    }
+
+    protected fun audioFormatFromMime(mimeType: String): String {
+        return when (mimeType.lowercase()) {
+            "audio/wav", "audio/x-wav" -> "wav"
+            "audio/mpeg", "audio/mp3" -> "mp3"
+            "audio/ogg" -> "ogg"
+            "audio/webm" -> "webm"
+            else -> mimeType.substringAfter("/", "wav")
+        }
+    }
+
+    protected open fun buildInputAudioPayload(link: MediaLink): JSONObject {
+        return JSONObject().apply {
+            put("data", link.base64Data)
+            put("format", audioFormatFromMime(link.mimeType))
+        }
+    }
+
     /**
      * 构建content字段（可能是字符串或数组）
      * @param text 要处理的文本内容
@@ -756,27 +792,11 @@ open class OpenAIProvider(
 
         val contentArray = JSONArray()
 
-        fun audioFormatFromMime(mimeType: String): String {
-            return when (mimeType.lowercase()) {
-                "audio/wav", "audio/x-wav" -> "wav"
-                "audio/mpeg", "audio/mp3" -> "mp3"
-                "audio/ogg" -> "ogg"
-                "audio/webm" -> "webm"
-                else -> mimeType.substringAfter("/", "wav")
-            }
-        }
-
         if (supportsAudio) {
             audioLinks.forEach { link ->
                 contentArray.put(JSONObject().apply {
                     put("type", "input_audio")
-                    put(
-                        "input_audio",
-                        JSONObject().apply {
-                            put("data", link.base64Data)
-                            put("format", audioFormatFromMime(link.mimeType))
-                        }
-                    )
+                    put("input_audio", buildInputAudioPayload(link))
                 })
             }
         }
@@ -835,8 +855,12 @@ open class OpenAIProvider(
         val providerReadyHistory = prepareHistoryForProvider(chatHistory, useToolCall)
 
         // 使用TokenCacheManager计算token数量（包含工具定义）
-        val comparableHistory = buildComparableHistory(providerReadyHistory, preserveThinkInHistory)
-        val tokenCount = tokenCacheManager.calculateInputTokens(comparableHistory, toolsJson)
+        val tokenCount =
+            calculateAndStoreInputTokens(
+                providerReadyHistory,
+                toolsJson,
+                preserveThinkInHistory
+            )
         val effectiveHistory = providerReadyHistory
 
         var queuedAssistantToolText: String? = null
@@ -1570,15 +1594,29 @@ open class OpenAIProvider(
     }
 
     // 创建请求
-    private suspend fun createRequest(requestBody: RequestBody): Request {
+    private suspend fun createRequest(
+        requestBody: RequestBody,
+        requestTraceId: String,
+        stream: Boolean,
+        attemptNumber: Int
+    ): Request {
         val currentApiKey = apiKeyProvider.getApiKey().trim()
+        val endpointUrl = EndpointCompleter.completeEndpoint(apiEndpoint, providerType)
+        val traceContext =
+            LlmRequestTraceContext(
+                requestId = requestTraceId,
+                provider = providerType.name,
+                model = modelName,
+                stream = stream,
+                attempt = attemptNumber,
+                endpointLabel = endpointUrl.substringBefore('?')
+            )
         val builder = Request.Builder()
-            .url(EndpointCompleter.completeEndpoint(apiEndpoint, providerType))
+            .url(endpointUrl)
+            .tag(LlmRequestTraceContext::class.java, traceContext)
             .addHeader("Content-Type", "application/json")
 
-        if (currentApiKey.isNotEmpty()) {
-            builder.addHeader("Authorization", "Bearer $currentApiKey")
-        }
+        applyAuthenticationHeaders(builder, currentApiKey)
 
         // 添加自定义请求头
         customHeaders.forEach { (key, value) ->
@@ -1586,7 +1624,12 @@ open class OpenAIProvider(
         }
 
         val request = builder.post(requestBody).build()
-        logLargeString("AIService", "Request headers: \n${request.headers}")
+        val bodyBytes = runCatching { requestBody.contentLength() }.getOrDefault(-1L)
+        AppLogger.d(
+            "AIService",
+            "[req=$requestTraceId] Request trace summary: provider=${traceContext.provider}, model=${traceContext.model}, stream=$stream, attempt=$attemptNumber, bodyBytes=$bodyBytes, endpoint=${traceContext.endpointLabel}"
+        )
+        logLargeString("AIService", "Request headers: \n${HttpLogSanitizer.headersForLog(request.headers)}")
         return request
     }
 
@@ -2274,24 +2317,30 @@ open class OpenAIProvider(
                     tokenCacheManager.cachedInputTokenCount,
                     tokenCacheManager.outputTokenCount
                 )
-                val request = createRequest(requestBody)
+                val attemptNumber = retryCount + 1
+                val requestTraceId = "llm_${attemptNumber}_${UUID.randomUUID().toString().substring(0, 8)}"
+                val request = createRequest(requestBody, requestTraceId, stream, attemptNumber)
                 AppLogger.d(
                     "AIService",
-                    "【发送消息】请求体构建完成，目标模型: $modelName，API端点: $apiEndpoint"
+                    "[req=$requestTraceId] 【发送消息】请求体构建完成，目标模型: $modelName，API端点: $apiEndpoint"
                 )
 
-                AppLogger.d("AIService", "【发送消息】准备连接到AI服务...")
+                AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】准备连接到AI服务...")
 
                 // 创建Call对象并保存到activeCall中，以便可以取消
                 val call = client.newCall(request)
                 activeCall = call
 
-                AppLogger.d("AIService", "【发送消息】正在建立连接到服务器...")
+                AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】正在建立连接到服务器...")
 
                 // 确保在IO线程执行网络请求和响应体读取
-                AppLogger.d("AIService", "【发送消息】切换到IO线程执行网络请求")
+                AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】切换到IO线程执行网络请求")
                 withContext(Dispatchers.IO) {
+                    val executeStartNs = System.nanoTime()
+                    AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】进入 call.execute()，开始等待响应头")
                     val response = call.execute()
+                    val executeElapsedMs = (System.nanoTime() - executeStartNs) / 1_000_000
+                    AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】call.execute() 返回，耗时=${executeElapsedMs}ms")
 
                     // 保存response引用，以便取消时能强制关闭
                     activeResponse = response
@@ -2315,13 +2364,13 @@ open class OpenAIProvider(
 
                         AppLogger.d(
                             "AIService",
-                            "【发送消息】连接成功(状态码: ${response.code})，准备处理响应..."
+                            "[req=$requestTraceId] 【发送消息】连接成功(状态码: ${response.code})，准备处理响应..."
                         )
                         val responseBody = response.body ?: throw IOException(context.getString(R.string.openai_error_response_empty))
 
                         // 根据stream参数处理响应
                         if (stream) {
-                            AppLogger.d("AIService", "【发送消息】开始读取流式响应")
+                            AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】开始读取流式响应")
                             val reader = responseBody.charStream().buffered()
                             processStreamingResponse(
                                 reader,
@@ -2330,9 +2379,9 @@ open class OpenAIProvider(
                                 context
                             )
                         } else {
-                            AppLogger.d("AIService", "【发送消息】开始读取非流式响应")
+                            AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】开始读取非流式响应")
                             val responseText = responseBody.string()
-                            AppLogger.d("AIService", "收到完整响应，长度: ${responseText.length}")
+                            AppLogger.d("AIService", "[req=$requestTraceId] 收到完整响应，长度: ${responseText.length}")
 
                             var hasEmittedRegularContent = false
 
@@ -2410,7 +2459,7 @@ open class OpenAIProvider(
 
                                 applyUsageToCounters(jsonResponse.optJSONObject("usage"), onTokensUpdated)
 
-                                AppLogger.d("AIService", "【发送消息】非流式响应处理完成")
+                                AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】非流式响应处理完成")
                             } catch (e: IOException) {
                                 throw e
                             } catch (e: Exception) {
@@ -2420,7 +2469,7 @@ open class OpenAIProvider(
                         }
                     } finally {
                         response.close()
-                        AppLogger.d("AIService", "【发送消息】关闭响应连接")
+                        AppLogger.d("AIService", "[req=$requestTraceId] 【发送消息】关闭响应连接")
                     }
                 }
 

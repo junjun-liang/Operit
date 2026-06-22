@@ -8,6 +8,7 @@ import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.core.chat.hooks.SummaryHookContext
 import com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry
+import com.ai.assistance.operit.core.chat.hooks.buildActivePromptHookMetadata
 import com.ai.assistance.operit.core.chat.hooks.toPromptTurns
 import com.ai.assistance.operit.core.config.SystemPromptConfig
 import com.ai.assistance.operit.core.tools.climode.ToolExposureMode
@@ -111,11 +112,17 @@ class ConversationService(
     suspend fun generateSummaryFromPromptTurns(
             messages: List<PromptTurn>,
             previousSummary: String?,
-            multiServiceManager: MultiServiceManager
+            multiServiceManager: MultiServiceManager,
+            customRules: String? = null
     ): String {
         try {
             val useEnglish = LocaleUtils.getCurrentLanguage(context).lowercase().startsWith("en")
+            val activePromptMetadata = buildActivePromptHookMetadata(context)
             var systemPrompt = FunctionalPrompts.buildSummarySystemPrompt(previousSummary, useEnglish)
+            // 注入自定义总结规则
+            if (!customRules.isNullOrBlank()) {
+                systemPrompt += "\n\n${customRules.trim()}"
+            }
             val sanitizedMessages = ChatUtils.stripGeminiThoughtSignatureMetaTurns(messages)
 
             // Get all model parameters from preferences (with enabled state)
@@ -130,7 +137,7 @@ class ConversationService(
                 mapOf(
                     "providerModel" to summaryService.providerModel,
                     "sourceMessageCount" to summaryHistory.size
-                )
+                ) + activePromptMetadata
 
             val beforePrepareContext =
                 SummaryHookRegistry.dispatchSummaryGenerateHooks(
@@ -400,6 +407,7 @@ class ConversationService(
             dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchSystemPromptComposeHooks,
             dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
     ): List<PromptTurn> {
+        val activePromptMetadata = buildActivePromptHookMetadata(context, chatId, roleCardId)
         val beforeContext =
             dispatchHistoryHooks(
                 PromptHookContext(
@@ -413,7 +421,6 @@ class ConversationService(
                             "workspacePath" to workspacePath,
                             "workspaceEnv" to workspaceEnv,
                             "customSystemPromptTemplate" to customSystemPromptTemplate,
-                            "roleCardId" to roleCardId,
                             "enableGroupOrchestrationHint" to enableGroupOrchestrationHint,
                             "groupParticipantNamesText" to groupParticipantNamesText,
                             "proxySenderName" to proxySenderName,
@@ -425,7 +432,7 @@ class ConversationService(
                             "useToolCallApi" to useToolCallApi,
                             "chatModelHasDirectImage" to chatModelHasDirectImage,
                             "toolExposureMode" to toolExposureMode.name
-                        )
+                        ) + activePromptMetadata
                 )
             )
         val effectiveChatHistory = beforeContext.chatHistory
@@ -493,6 +500,7 @@ class ConversationService(
                 val systemPrompt = SystemPromptConfig.getSystemPromptWithCustomPrompts(
                     context = context,
                     packageManager = packageManager,
+                    chatId = chatId,
                     workspacePath = workspacePath,
                     workspaceEnv = workspaceEnv,
                     safBookmarkNames = safBookmarkNames,
@@ -516,6 +524,7 @@ class ConversationService(
                     groupOrchestrationRoleName = activeCard?.name?.takeIf { it.isNotBlank() }
                         ?: context.getString(R.string.app_name),
                     groupParticipantNamesText = groupParticipantNamesText.orEmpty(),
+                    hookMetadata = activePromptMetadata,
                     dispatchSystemPromptComposeHooks = dispatchSystemPromptComposeHooks,
                     dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
                 )
@@ -1034,7 +1043,6 @@ class ConversationService(
     private suspend fun replacePromptPlaceholders(prompt: String, aiName: String): String {
         var finalPrompt = prompt
         
-        // 获取全局用户名
         val globalUserName = displayPreferencesManager.globalUserName.first() ?: "User"
         
         // 替换占位符
@@ -1057,8 +1065,11 @@ class ConversationService(
         val targetLanguage = when (currentLanguage) {
             LocaleUtils.LanguageCodes.CHINESE -> context.getString(R.string.conversation_language_chinese)
             LocaleUtils.LanguageCodes.ENGLISH -> "English"
+            LocaleUtils.LanguageCodes.KOREAN -> "Korean"
+            LocaleUtils.LanguageCodes.SPANISH -> "Spanish"
             LocaleUtils.LanguageCodes.MALAY -> "Malay"
             LocaleUtils.LanguageCodes.INDONESIAN -> "Indonesian"
+            LocaleUtils.LanguageCodes.PORTUGUESE_BRAZIL -> "Portuguese (Brazil)"
             else -> context.getString(R.string.conversation_language_chinese) // 默认翻译为中文
         }
         

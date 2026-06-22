@@ -30,10 +30,10 @@ import com.ai.assistance.operit.R
 internal fun TokenUsageSummarySection(
     totalChats: Int,
     totalMessages: Int,
-    totalTokens: Int,
-    totalInputTokens: Int,
-    totalOutputTokens: Int,
-    totalCachedInputTokens: Int,
+    totalTokens: Long,
+    totalInputTokens: Long,
+    totalOutputTokens: Long,
+    totalCachedInputTokens: Long,
     totalRequests: Int,
     totalCostText: String,
     exchangeRateHint: String?
@@ -159,7 +159,7 @@ internal fun TokenUsageSummarySection(
                     valueColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     labelColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
-                if (totalCachedInputTokens > 0) {
+                if (totalCachedInputTokens > 0L) {
                     SummaryLine(
                         label = stringResource(id = R.string.settings_cached_tokens_label),
                         value = totalCachedInputTokens.toString(),
@@ -198,7 +198,7 @@ private fun SummaryLine(
 }
 
 @Composable
-internal fun ModelUsageDistributionSection(items: List<Pair<String, Int>>) {
+internal fun ModelUsageDistributionSection(items: List<Pair<String, Long>>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = stringResource(id = R.string.settings_model_usage_distribution),
@@ -217,9 +217,9 @@ internal fun ModelUsageDistributionSection(items: List<Pair<String, Int>>) {
 @Composable
 private fun ModelUsagePieChart(
     modifier: Modifier = Modifier,
-    items: List<Pair<String, Int>>
+    items: List<Pair<String, Long>>
 ) {
-    val total = remember(items) { items.sumOf { it.second }.toFloat().coerceAtLeast(1f) }
+    val total = remember(items) { items.sumOf { it.second }.toDouble().coerceAtLeast(1.0) }
     val colors = listOf(
         MaterialTheme.colorScheme.primary,
         MaterialTheme.colorScheme.secondary,
@@ -246,7 +246,7 @@ private fun ModelUsagePieChart(
                     var startAngle = -90f
 
                     items.forEachIndexed { index, (_, value) ->
-                        val sweep = (value / total) * 360f
+                        val sweep = ((value.toDouble() / total) * 360.0).toFloat()
                         if (sweep > 0f) {
                             drawArc(
                                 color = colors[index % colors.size],
@@ -280,7 +280,7 @@ private fun ModelUsagePieChart(
                             modifier = Modifier.weight(1f),
                             maxLines = 1
                         )
-                        val percent = (value / total) * 100f
+                        val percent = (value.toDouble() / total) * 100.0
                         Text(
                             text = String.format("%.1f%%", percent),
                             style = MaterialTheme.typography.bodySmall,

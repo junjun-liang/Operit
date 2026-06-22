@@ -875,6 +875,14 @@ export interface TextProps extends ComposeCommonProps {
   weight?: number;
 }
 
+export interface MarkdownProps extends ComposeCommonProps {
+  text: string;
+  color?: ComposeColor;
+  fontSize?: number;
+  enableDialogs?: boolean;
+  streamTagName?: string;
+}
+
 export interface TextFieldProps extends ComposeCommonProps {
   label?: string | ComposeChildren;
   placeholder?: string | ComposeChildren;
@@ -1055,6 +1063,7 @@ export interface ComposeUiFactoryRegistry {
   Box: ComposeNodeFactory<BoxProps>;
   Spacer: ComposeNodeFactory<SpacerProps>;
   Text: ComposeNodeFactory<TextProps>;
+  Markdown: ComposeNodeFactory<MarkdownProps>;
   TextField: ComposeNodeFactory<TextFieldProps>;
   Switch: ComposeNodeFactory<SwitchProps>;
   Checkbox: ComposeNodeFactory<CheckboxProps>;
@@ -1094,6 +1103,25 @@ export interface ComposeResolveToolNameRequest {
   preferImported?: boolean;
 }
 
+export interface ComposeFilePickerOptions {
+  mimeTypes?: string[];
+  allowMultiple?: boolean;
+  persistPermission?: boolean;
+}
+
+export interface ComposePickedFile {
+  uri: string;
+  path?: string;
+  name?: string;
+  mimeType?: string;
+  size?: number | null;
+}
+
+export interface ComposeFilePickerResult {
+  cancelled: boolean;
+  files: ComposePickedFile[];
+}
+
 export interface ComposeRouteInfo {
   routeId: string;
   runtime: string;
@@ -1117,6 +1145,7 @@ export interface ComposeDslContext {
   showToast(message: string): Promise<void> | void;
   reportError(error: unknown): Promise<void> | void;
   createWebViewController(key: string): ComposeWebViewController;
+  openFilePicker(options?: ComposeFilePickerOptions): Promise<ComposeFilePickerResult>;
 
   /**
    * Returns runtime module spec parsed from a registered toolpkg runtime module entry.

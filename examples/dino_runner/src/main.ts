@@ -24,7 +24,7 @@ export function registerToolPkg(): boolean {
       zh: "小恐龙快跑",
       en: "Dino Runner",
     },
-    icon: "SportsEsports",
+    icon: Icons.SportsEsports,
     order: 145,
   });
 

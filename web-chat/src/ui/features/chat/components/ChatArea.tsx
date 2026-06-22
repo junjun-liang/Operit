@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { BubbleStyleChatMessage } from './style/bubble/BubbleStyleChatMessage';
 import { CursorStyleChatMessage } from './style/cursor/CursorStyleChatMessage';
 import { ChatScrollNavigator } from './ChatScrollNavigator';
-import { ScrollToBottomButton } from './ScrollToBottomButton';
 import type {
   ChatStyle,
   WebChatMessage,
@@ -58,7 +57,10 @@ export function ChatArea({
   onLoadOlder: () => Promise<void>;
   onLoadNewer: () => Promise<void>;
   onJumpToLatest: () => Promise<void>;
-  onLoadMessageLocatorEntries: (chatId: string) => Promise<WebChatMessageLocatorPreview[]>;
+  onLoadMessageLocatorEntries: (
+    chatId: string,
+    query?: string
+  ) => Promise<WebChatMessageLocatorPreview[]>;
   onRevealMessageForLocator: (targetTimestamp: number) => Promise<boolean>;
   onToggleFavoriteMessage: (timestamp: number, isFavorite: boolean) => Promise<void>;
   theme: WebThemeSnapshot | null;
@@ -297,8 +299,10 @@ export function ChatArea({
       </div>
 
       <ChatScrollNavigator
+        autoScrollToBottom={autoScrollToBottom}
         chatHistory={chatHistory}
         currentChatId={currentChatId}
+        hasNewerDisplayHistory={hasMoreHistoryAfter}
         loadLocatorEntries={onLoadMessageLocatorEntries}
         messageAnchors={messageAnchors}
         onJumpToMessage={(targetIndex) => {
@@ -329,19 +333,13 @@ export function ChatArea({
           }
           return didReveal;
         }}
-        onToggleFavoriteMessage={onToggleFavoriteMessage}
-        scrollElement={scrollRef.current}
-        viewportHeightPx={viewportHeightPx}
-      />
-
-      <ScrollToBottomButton
-        autoScrollToBottom={autoScrollToBottom}
-        hasNewerDisplayHistory={hasMoreHistoryAfter}
         onAutoScrollToBottomChange={onAutoScrollToBottomChange}
         onRequestLatestMessages={() => {
           void onJumpToLatest();
         }}
+        onToggleFavoriteMessage={onToggleFavoriteMessage}
         scrollElement={scrollRef.current}
+        viewportHeightPx={viewportHeightPx}
       />
     </div>
   );

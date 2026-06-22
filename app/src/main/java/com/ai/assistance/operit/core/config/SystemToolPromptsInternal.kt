@@ -26,6 +26,35 @@ object SystemToolPromptsInternal {
                                 )
                         ),
                         ToolPrompt(
+                            name = "apply_file",
+                            description = "Applies edits to a file by finding and replacing/deleting a matched content block.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(name = "path", type = "string", description = "file path", required = true),
+                                    ToolParameterSchema(name = "environment", type = "string", description = "optional, same as read_file environment", required = false),
+                                    ToolParameterSchema(name = "type", type = "string", description = "operation type: replace | delete | create", required = true),
+                                    ToolParameterSchema(name = "old", type = "string", description = "the exact content to be matched and replaced/deleted (required for replace/delete)", required = false),
+                                    ToolParameterSchema(name = "new", type = "string", description = "the new content to insert (required for replace/create)", required = false)
+                                ),
+                            details = """
+  - **How it works**:
+    - The tool finds the best fuzzy match of `old` in the current file content (not by line numbers) and applies the requested operation.
+    - You can call this tool multiple times to apply multiple independent edits.
+
+  - **Parameters**:
+    - `type`:
+      - `replace`: replace the matched `old` content with `new`
+      - `delete`: delete the matched `old` content
+      - `create`: create the file when it does not exist (write `new` as full file content)
+    - `old`: required for `replace` / `delete`
+    - `new`: required for `replace` / `create`
+
+  - **CRITICAL RULES**:
+    1. **If you need to rewrite a whole existing file**: do **NOT** use apply_file to overwrite it. Instead, call `delete_file` first, then use `apply_file` with `type=create`.
+    2. **If you need to modify an existing file**: you **MUST** use `type=replace` (or `type=delete`) and provide `old` / `new`. Do **NOT** delete the whole file and rewrite it.
+"""
+                        ),
+                        ToolPrompt(
                             name = "create_terminal_session",
                             description = "Create or get a terminal session.",
                             parametersStructured =
@@ -141,6 +170,138 @@ object SystemToolPromptsInternal {
                                         required = true
                                     )
                                 )
+                        ),
+                        ToolPrompt(
+                            name = "music_play",
+                            description = "Play audio inside the app using the built-in music player.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "source",
+                                        type = "string",
+                                        description = "audio source",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "source_type",
+                                        type = "string",
+                                        description = "source type: path | url | uri",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "title",
+                                        type = "string",
+                                        description = "optional display title",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "artist",
+                                        type = "string",
+                                        description = "optional display artist",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "loop",
+                                        type = "boolean",
+                                        description = "optional, repeat this track",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "optional, 0 to 1",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_position_ms",
+                                        type = "integer",
+                                        description = "optional start position in milliseconds",
+                                        required = false
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_play_queue",
+                            description = "Play an audio queue inside the app using the built-in music player.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "items",
+                                        type = "array",
+                                        description = "track objects with source, source_type, optional title, optional artist",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "loop",
+                                        type = "boolean",
+                                        description = "optional, repeat the queue",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "optional, 0 to 1",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_index",
+                                        type = "integer",
+                                        description = "optional zero-based queue start index",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_position_ms",
+                                        type = "integer",
+                                        description = "optional start position in milliseconds for the first track",
+                                        required = false
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_pause",
+                            description = "Pause the current app music playback.",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_resume",
+                            description = "Resume the current app music playback.",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_stop",
+                            description = "Stop the current app music playback.",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_seek",
+                            description = "Seek the current app music playback.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "position_ms",
+                                        type = "integer",
+                                        description = "target position in milliseconds",
+                                        required = true
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_set_volume",
+                            description = "Set the current app music playback volume.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "volume from 0 to 1",
+                                        required = true
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_status",
+                            description = "Get the current app music playback status.",
+                            parametersStructured = emptyList()
                         ),
                         ToolPrompt(
                             name = "browser_click",
@@ -1119,6 +1280,12 @@ object SystemToolPromptsInternal {
                                         required = false
                                     ),
                                     ToolParameterSchema(
+                                        name = "runtime",
+                                        type = "string",
+                                        description = "optional, runtime slot for this send: main | floating (default floating)",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
                                         name = "role_card_id",
                                         type = "string",
                                         description = "optional, role card id to use for this send",
@@ -1642,13 +1809,13 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_service_type",
                                         type = "string",
-                                        description = "optional, SIMPLE_TTS/HTTP_TTS/OPENAI_WS_TTS/SILICONFLOW_TTS/MINIMAX_TTS/OPENAI_TTS/ONNX_TTS",
+                                        description = "optional, SIMPLE_TTS/HTTP_TTS/OPENAI_WS_TTS/SILICONFLOW_TTS/MINIMAX_TTS/MIMO_TTS/DOUBAO_TTS/OPENAI_TTS/VITS_TTS",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_url_template",
                                         type = "string",
-                                        description = "optional, TTS endpoint URL template; for ONNX_TTS this is the local .onnx model path",
+                                        description = "optional, endpoint URL template for HTTP-style TTS providers",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -1660,7 +1827,7 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_headers",
                                         type = "string",
-                                        description = "optional, TTS headers JSON object string; for ONNX_TTS this stores local options such as sample_rate/noise_scale/input names",
+                                        description = "optional, HTTP-style TTS headers JSON object string",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -1690,19 +1857,37 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_voice_id",
                                         type = "string",
-                                        description = "optional, TTS voice id; for ONNX_TTS this is numeric speaker id when the model requires it",
+                                        description = "optional, TTS voice id. For MIMO voiceclone, this may be the full data:audio/...;base64,... audio sample",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_model_name",
                                         type = "string",
-                                        description = "optional, TTS model name; for ONNX_TTS this is the local tokenizer/config JSON path",
+                                        description = "optional, TTS model name",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_response_pipeline",
                                         type = "string",
                                         description = "optional, HTTP TTS response pipeline JSON array string",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_package_path",
+                                        type = "string",
+                                        description = "optional, local VITS/Piper TTS package path; accepts a .zip file or extracted package directory",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_speaker_id",
+                                        type = "string",
+                                        description = "optional, numeric speaker id for VITS/Piper TTS packages that require it",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_options",
+                                        type = "string",
+                                        description = "optional, VITS/Piper TTS package options JSON object string, such as sample_rate/frontend/text_mode/input names",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -1800,7 +1985,7 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "api_provider_type",
                                         type = "string",
-                                        description = "optional, provider enum name (e.g. OPENAI_GENERIC/OPENAI_LOCAL/OPENAI_RESPONSES_GENERIC/DEEPSEEK/GEMINI_GENERIC/LMSTUDIO/OLLAMA/MNN/LLAMA_CPP)",
+                                        description = "optional, provider enum name (e.g. OPENAI_GENERIC/OPENAI_LOCAL/OPENAI_RESPONSES_GENERIC/DEEPSEEK/MIMO/GEMINI_GENERIC/LMSTUDIO/OLLAMA/MNN/LLAMA_CPP)",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -2162,6 +2347,12 @@ object SystemToolPromptsInternal {
                                         name = "enable_google_search",
                                         type = "boolean",
                                         description = "optional, Gemini grounding switch",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "enable_claude_1h_prompt_cache",
+                                        type = "boolean",
+                                        description = "optional, Claude 1-hour prompt cache switch",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -2534,6 +2725,175 @@ object SystemToolPromptsInternal {
                                         default = "true"
                                     )
                                 )
+                        ),
+                        ToolPrompt(
+                            name = "request_bluetooth_permission",
+                            description = "Request Bluetooth nearby devices permission.",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "get_bluetooth_state",
+                            description = "Get Bluetooth adapter state.",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "request_enable_bluetooth",
+                            description = "Open the system dialog to enable Bluetooth.",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "list_bluetooth_bonded_devices",
+                            description = "List bonded Bluetooth devices.",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "scan_bluetooth_devices",
+                            description = "Scan nearby Bluetooth classic and BLE devices.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("duration_ms", "integer", "optional, scan duration in milliseconds", false, "10000"),
+                                    ToolParameterSchema("include_ble", "boolean", "optional, include BLE scan", false, "true")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_connect",
+                            description = "Connect to a Bluetooth classic device.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("address", "string", "Bluetooth MAC address", true),
+                                    ToolParameterSchema("uuid", "string", "optional RFCOMM UUID", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_listen",
+                            description = "Listen for another device connecting to this phone over Bluetooth classic.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("name", "string", "optional service name", false, "Operit Bluetooth"),
+                                    ToolParameterSchema("uuid", "string", "optional RFCOMM UUID", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_accept",
+                            description = "Accept an incoming Bluetooth classic connection from a listener session.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("listener_session_id", "string", "listener session ID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "30000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_send",
+                            description = "Send text or base64 bytes to a Bluetooth classic session.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "Bluetooth session ID", true),
+                                    ToolParameterSchema("text", "string", "UTF-8 text to send", false),
+                                    ToolParameterSchema("data_base64", "string", "base64 bytes to send", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_read",
+                            description = "Read text or bytes from a Bluetooth classic session.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "Bluetooth session ID", true),
+                                    ToolParameterSchema("max_bytes", "integer", "optional maximum bytes to read", false, "4096"),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "3000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_send_and_read",
+                            description = "Send text or bytes to a Bluetooth classic session and read the response.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "Bluetooth session ID", true),
+                                    ToolParameterSchema("text", "string", "UTF-8 text to send", false),
+                                    ToolParameterSchema("data_base64", "string", "base64 bytes to send", false),
+                                    ToolParameterSchema("max_bytes", "integer", "optional maximum bytes to read", false, "4096"),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "3000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_close",
+                            description = "Close a Bluetooth classic, listener, or BLE session.",
+                            parametersStructured = listOf(ToolParameterSchema("session_id", "string", "Bluetooth session ID", true))
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_connect",
+                            description = "Connect to a BLE device.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("address", "string", "Bluetooth MAC address", true),
+                                    ToolParameterSchema("auto_connect", "boolean", "optional BLE autoConnect flag", false, "false")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_discover_services",
+                            description = "Discover BLE services and characteristics.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "10000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_read_characteristic",
+                            description = "Read a BLE characteristic.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "5000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_write_characteristic",
+                            description = "Write text or base64 bytes to a BLE characteristic.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("text", "string", "UTF-8 text to write", false),
+                                    ToolParameterSchema("data_base64", "string", "base64 bytes to write", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_write_and_read_characteristic",
+                            description = "Write text or base64 bytes to a BLE characteristic and read another characteristic response.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("write_service_uuid", "string", "write service UUID", true),
+                                    ToolParameterSchema("write_characteristic_uuid", "string", "write characteristic UUID", true),
+                                    ToolParameterSchema("read_service_uuid", "string", "read service UUID", true),
+                                    ToolParameterSchema("read_characteristic_uuid", "string", "read characteristic UUID", true),
+                                    ToolParameterSchema("text", "string", "UTF-8 text to write", false),
+                                    ToolParameterSchema("data_base64", "string", "base64 bytes to write", false),
+                                    ToolParameterSchema("timeout_ms", "integer", "optional wait time in milliseconds", false, "5000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_subscribe_characteristic",
+                            description = "Subscribe or unsubscribe BLE characteristic notifications.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("enable", "boolean", "optional subscription state", false, "true")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_read_notifications",
+                            description = "Read received BLE notifications.",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE session ID", true),
+                                    ToolParameterSchema("limit", "integer", "optional notification count", false, "20")
+                                )
                         )
                     )
             ),
@@ -2630,6 +2990,35 @@ object SystemToolPromptsInternal {
                                         required = true
                                     )
                                 )
+                        ),
+                        ToolPrompt(
+                            name = "apply_file",
+                            description = "通过查找并替换/删除匹配的内容块来编辑文件。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(name = "path", type = "string", description = "文件路径", required = true),
+                                    ToolParameterSchema(name = "environment", type = "string", description = "可选，同 read_file 的 environment", required = false),
+                                    ToolParameterSchema(name = "type", type = "string", description = "操作类型：replace | delete | create", required = true),
+                                    ToolParameterSchema(name = "old", type = "string", description = "用于匹配/替换/删除的原始内容（replace/delete必填）", required = false),
+                                    ToolParameterSchema(name = "new", type = "string", description = "要插入的新内容（replace/create必填）", required = false)
+                                ),
+                            details = """
+  - **工作原理**:
+    - 工具会在文件当前内容中对 `old` 做最佳的模糊匹配（不依赖行号），然后执行指定操作。
+    - 你可以多次调用本工具，对同一个文件做多处独立修改。
+
+  - **参数**:
+    - `type`:
+      - `replace`: 用 `new` 替换匹配到的 `old`
+      - `delete`: 删除匹配到的 `old`
+      - `create`: 当文件不存在时创建文件（用 `new` 作为完整文件内容）
+    - `old`: `replace` / `delete` 必填
+    - `new`: `replace` / `create` 必填
+
+  - **关键规则**:
+    1. **如果需要重写整个已存在文件**：不要用 apply_file 直接覆盖。请先 `delete_file`，再使用 `apply_file` 且 `type=create`。
+    2. **如果需要修改已存在文件**：必须用 `type=replace`（或 `type=delete`）并提供 `old/new`（或 `old`）。不要删除整个文件再重写。
+"""
                         ),
                         ToolPrompt(
                             name = "create_terminal_session",
@@ -2747,6 +3136,138 @@ object SystemToolPromptsInternal {
                                         required = true
                                     )
                                 )
+                        ),
+                        ToolPrompt(
+                            name = "music_play",
+                            description = "使用应用内置音乐播放器播放音频。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "source",
+                                        type = "string",
+                                        description = "音频来源",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "source_type",
+                                        type = "string",
+                                        description = "来源类型：path | url | uri",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "title",
+                                        type = "string",
+                                        description = "可选，显示标题",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "artist",
+                                        type = "string",
+                                        description = "可选，显示艺术家",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "loop",
+                                        type = "boolean",
+                                        description = "可选，循环当前曲目",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "可选，0 到 1",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_position_ms",
+                                        type = "integer",
+                                        description = "可选，开始播放位置，单位毫秒",
+                                        required = false
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_play_queue",
+                            description = "使用应用内置音乐播放器播放音频队列。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "items",
+                                        type = "array",
+                                        description = "曲目对象数组，包含 source、source_type，可选 title、artist",
+                                        required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "loop",
+                                        type = "boolean",
+                                        description = "可选，循环队列",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "可选，0 到 1",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_index",
+                                        type = "integer",
+                                        description = "可选，从队列第几个曲目开始，0 为第一首",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "start_position_ms",
+                                        type = "integer",
+                                        description = "可选，第一首开始播放位置，单位毫秒",
+                                        required = false
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_pause",
+                            description = "暂停当前应用内音乐播放。",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_resume",
+                            description = "继续当前应用内音乐播放。",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_stop",
+                            description = "停止当前应用内音乐播放。",
+                            parametersStructured = emptyList()
+                        ),
+                        ToolPrompt(
+                            name = "music_seek",
+                            description = "跳转当前应用内音乐播放位置。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "position_ms",
+                                        type = "integer",
+                                        description = "目标位置，单位毫秒",
+                                        required = true
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_set_volume",
+                            description = "设置当前应用内音乐播放音量。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema(
+                                        name = "volume",
+                                        type = "number",
+                                        description = "音量，0 到 1",
+                                        required = true
+                                    )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "music_status",
+                            description = "获取当前应用内音乐播放状态。",
+                            parametersStructured = emptyList()
                         ),
                         ToolPrompt(
                             name = "browser_click",
@@ -3725,6 +4246,12 @@ object SystemToolPromptsInternal {
                                         required = false
                                     ),
                                     ToolParameterSchema(
+                                        name = "runtime",
+                                        type = "string",
+                                        description = "可选，本次发送使用的 runtime：main | floating（默认 floating）",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
                                         name = "role_card_id",
                                         type = "string",
                                         description = "可选，本次发送使用的角色卡 ID",
@@ -4248,13 +4775,13 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_service_type",
                                         type = "string",
-                                        description = "可选，SIMPLE_TTS/HTTP_TTS/OPENAI_WS_TTS/SILICONFLOW_TTS/MINIMAX_TTS/OPENAI_TTS/ONNX_TTS",
+                                        description = "可选，SIMPLE_TTS/HTTP_TTS/OPENAI_WS_TTS/SILICONFLOW_TTS/MINIMAX_TTS/MIMO_TTS/DOUBAO_TTS/OPENAI_TTS/VITS_TTS",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_url_template",
                                         type = "string",
-                                        description = "可选，TTS 端点 URL 模板；ONNX_TTS 时表示本地 .onnx 模型路径",
+                                        description = "可选，HTTP 类 TTS 的端点 URL 模板",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -4266,7 +4793,7 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_headers",
                                         type = "string",
-                                        description = "可选，TTS headers 的 JSON 对象字符串；ONNX_TTS 时存放 sample_rate/noise_scale/input 名称等本地参数",
+                                        description = "可选，HTTP 类 TTS headers 的 JSON 对象字符串",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -4296,19 +4823,37 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "tts_voice_id",
                                         type = "string",
-                                        description = "可选，TTS 音色 ID；ONNX_TTS 时表示模型需要的数字 speaker id",
+                                        description = "可选，TTS 音色 ID。MIMO voiceclone 可填写完整 data:audio/...;base64,... 音频样本",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_model_name",
                                         type = "string",
-                                        description = "可选，TTS 模型名；ONNX_TTS 时表示本地 tokenizer/config JSON 路径",
+                                        description = "可选，TTS 模型名",
                                         required = false
                                     ),
                                     ToolParameterSchema(
                                         name = "tts_response_pipeline",
                                         type = "string",
                                         description = "可选，HTTP TTS 响应处理管线 JSON 数组字符串",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_package_path",
+                                        type = "string",
+                                        description = "可选，本地 VITS/Piper TTS 模型包路径，支持 .zip 文件或已解压目录",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_speaker_id",
+                                        type = "string",
+                                        description = "可选，VITS/Piper TTS 模型包需要的数字 speaker id",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "tts_vits_options",
+                                        type = "string",
+                                        description = "可选，VITS/Piper TTS 模型包参数 JSON 对象字符串，例如 sample_rate/frontend/text_mode/input 名称",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -4406,7 +4951,7 @@ object SystemToolPromptsInternal {
                                     ToolParameterSchema(
                                         name = "api_provider_type",
                                         type = "string",
-                                        description = "可选，提供商枚举名（如 OPENAI_GENERIC/OPENAI_LOCAL/OPENAI_RESPONSES_GENERIC/DEEPSEEK/GEMINI_GENERIC/LMSTUDIO/OLLAMA/MNN/LLAMA_CPP）",
+                                        description = "可选，提供商枚举名（如 OPENAI_GENERIC/OPENAI_LOCAL/OPENAI_RESPONSES_GENERIC/DEEPSEEK/MIMO/GEMINI_GENERIC/LMSTUDIO/OLLAMA/MNN/LLAMA_CPP）",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -4768,6 +5313,12 @@ object SystemToolPromptsInternal {
                                         name = "enable_google_search",
                                         type = "boolean",
                                         description = "可选，Gemini 搜索增强开关",
+                                        required = false
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "enable_claude_1h_prompt_cache",
+                                        type = "boolean",
+                                        description = "可选，Claude 1 小时提示缓存开关",
                                         required = false
                                     ),
                                     ToolParameterSchema(
@@ -5139,6 +5690,175 @@ object SystemToolPromptsInternal {
                                         required = false,
                                         default = "true"
                                     )
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "request_bluetooth_permission",
+                            description = "请求蓝牙附近设备权限。",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "get_bluetooth_state",
+                            description = "获取蓝牙适配器状态。",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "request_enable_bluetooth",
+                            description = "打开系统蓝牙开启对话框。",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "list_bluetooth_bonded_devices",
+                            description = "列出已配对蓝牙设备。",
+                            parametersStructured = listOf()
+                        ),
+                        ToolPrompt(
+                            name = "scan_bluetooth_devices",
+                            description = "扫描附近蓝牙 Classic 与 BLE 设备。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("duration_ms", "integer", "可选，扫描时长毫秒", false, "10000"),
+                                    ToolParameterSchema("include_ble", "boolean", "可选，包含 BLE 扫描", false, "true")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_connect",
+                            description = "连接蓝牙 Classic 设备。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("address", "string", "蓝牙 MAC 地址", true),
+                                    ToolParameterSchema("uuid", "string", "可选，RFCOMM UUID", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_listen",
+                            description = "监听其他设备通过蓝牙 Classic 连接本机。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("name", "string", "可选，服务名", false, "Operit Bluetooth"),
+                                    ToolParameterSchema("uuid", "string", "可选，RFCOMM UUID", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_accept",
+                            description = "从蓝牙 Classic 监听会话接受一个传入连接。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("listener_session_id", "string", "监听会话 ID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "30000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_send",
+                            description = "向蓝牙 Classic 会话发送文本或 base64 字节。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "蓝牙会话 ID", true),
+                                    ToolParameterSchema("text", "string", "要发送的 UTF-8 文本", false),
+                                    ToolParameterSchema("data_base64", "string", "要发送的 base64 字节", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_read",
+                            description = "从蓝牙 Classic 会话读取文本或字节。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "蓝牙会话 ID", true),
+                                    ToolParameterSchema("max_bytes", "integer", "可选，最大读取字节数", false, "4096"),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "3000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_send_and_read",
+                            description = "向蓝牙 Classic 会话发送文本或字节并读取响应。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "蓝牙会话 ID", true),
+                                    ToolParameterSchema("text", "string", "要发送的 UTF-8 文本", false),
+                                    ToolParameterSchema("data_base64", "string", "要发送的 base64 字节", false),
+                                    ToolParameterSchema("max_bytes", "integer", "可选，最大读取字节数", false, "4096"),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "3000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_close",
+                            description = "关闭蓝牙 Classic、监听或 BLE 会话。",
+                            parametersStructured = listOf(ToolParameterSchema("session_id", "string", "蓝牙会话 ID", true))
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_connect",
+                            description = "连接 BLE 设备。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("address", "string", "蓝牙 MAC 地址", true),
+                                    ToolParameterSchema("auto_connect", "boolean", "可选，BLE autoConnect 标记", false, "false")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_discover_services",
+                            description = "发现 BLE service 和 characteristic。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "10000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_read_characteristic",
+                            description = "读取 BLE characteristic。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "5000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_write_characteristic",
+                            description = "向 BLE characteristic 写入文本或 base64 字节。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("text", "string", "要写入的 UTF-8 文本", false),
+                                    ToolParameterSchema("data_base64", "string", "要写入的 base64 字节", false)
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_write_and_read_characteristic",
+                            description = "向 BLE characteristic 写入文本或 base64 字节并读取另一个 characteristic 响应。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("write_service_uuid", "string", "写入 service UUID", true),
+                                    ToolParameterSchema("write_characteristic_uuid", "string", "写入 characteristic UUID", true),
+                                    ToolParameterSchema("read_service_uuid", "string", "读取 service UUID", true),
+                                    ToolParameterSchema("read_characteristic_uuid", "string", "读取 characteristic UUID", true),
+                                    ToolParameterSchema("text", "string", "要写入的 UTF-8 文本", false),
+                                    ToolParameterSchema("data_base64", "string", "要写入的 base64 字节", false),
+                                    ToolParameterSchema("timeout_ms", "integer", "可选，等待毫秒数", false, "5000")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_subscribe_characteristic",
+                            description = "订阅或取消订阅 BLE characteristic 通知。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("service_uuid", "string", "service UUID", true),
+                                    ToolParameterSchema("characteristic_uuid", "string", "characteristic UUID", true),
+                                    ToolParameterSchema("enable", "boolean", "可选，订阅状态", false, "true")
+                                )
+                        ),
+                        ToolPrompt(
+                            name = "bluetooth_ble_read_notifications",
+                            description = "读取已收到的 BLE 通知。",
+                            parametersStructured =
+                                listOf(
+                                    ToolParameterSchema("session_id", "string", "BLE 会话 ID", true),
+                                    ToolParameterSchema("limit", "integer", "可选，通知条数", false, "20")
                                 )
                         )
                     )

@@ -302,7 +302,6 @@ fun UserMessageComposable(
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    // Display main text content with inline attachments
                     Text(
                         text = textContent,
                         color = effectiveTextColor,

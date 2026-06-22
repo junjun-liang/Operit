@@ -16,6 +16,7 @@ import com.ai.assistance.operit.ui.main.navigation.AppRouteDiscoveryGateway
 import com.ai.assistance.operit.ui.main.navigation.AppRouterGateway
 import com.ai.assistance.operit.ui.main.navigation.RouteEntrySource
 import com.ai.assistance.operit.ui.main.navigation.RouteRuntime
+import com.ai.assistance.operit.ui.common.composedsl.ComposeDslFilePickerHostRegistry
 import com.ai.assistance.operit.ui.common.composedsl.ComposeDslWebViewHostRegistry
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.ImagePoolManager
@@ -80,6 +81,7 @@ class JsEngine(private val context: Context) {
         val callId: String,
         val future: CompletableFuture<Any?>,
         val intermediateResultCallback: ((Any?) -> Unit)?,
+        val dispatchIntermediateOnMain: Boolean,
         val envOverrides: Map<String, String>,
         val packageChatId: String?,
         val toolPkgLogSnapshot: JsToolPkgExecutionContext.LogSnapshot,
@@ -240,8 +242,7 @@ class JsEngine(private val context: Context) {
                     }
                 }
             }
-        } catch (e: RejectedExecutionException) {
-            AppLogger.d(TAG, "Skip QuickJS evaluation after executor shutdown: $fileName")
+        } catch (_: RejectedExecutionException) {
         }
     }
 
@@ -270,8 +271,7 @@ class JsEngine(private val context: Context) {
                     }
                 }
             }
-        } catch (e: RejectedExecutionException) {
-            AppLogger.d(TAG, "Skip QuickJS function call after executor shutdown: $callSite")
+        } catch (_: RejectedExecutionException) {
         }
     }
 
@@ -287,12 +287,14 @@ class JsEngine(private val context: Context) {
         params: Map<String, Any?>,
         envOverrides: Map<String, String>,
         onIntermediateResult: ((Any?) -> Unit)?,
+        dispatchIntermediateOnMain: Boolean,
         executionListener: JsExecutionListener?
     ): ExecutionSession {
         return ExecutionSession(
             callId = callId,
             future = CompletableFuture(),
             intermediateResultCallback = onIntermediateResult,
+            dispatchIntermediateOnMain = dispatchIntermediateOnMain,
             envOverrides = envOverrides,
             packageChatId =
                 params["__operit_package_chat_id"]
@@ -321,7 +323,7 @@ class JsEngine(private val context: Context) {
                 request.future.complete(
                     JSONObject()
                         .put("success", false)
-                        .put("error", reason)
+                        .put("message", reason)
                         .toString()
                 )
             }
@@ -403,7 +405,7 @@ class JsEngine(private val context: Context) {
         activeExecutionSessions.clear()
         sessions.forEach { session ->
             if (!session.future.isDone) {
-                session.future.complete("Error: $reason")
+                session.future.complete(buildJsExecutionErrorPayload(reason))
             }
             cancelExecutionSessionInJs(
                 callId = session.callId,
@@ -540,14 +542,14 @@ class JsEngine(private val context: Context) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return JSONObject()
                 .put("success", false)
-                .put("error", "java bridge callback cannot synchronously invoke JS on main thread")
+                .put("message", "java bridge callback cannot synchronously invoke JS on main thread")
                 .toString()
         }
 
         if (Thread.currentThread() === quickJsThread) {
             return JSONObject()
                 .put("success", false)
-                .put("error", "java bridge callback cannot synchronously invoke JS from quickjs thread")
+                .put("message", "java bridge callback cannot synchronously invoke JS from quickjs thread")
                 .toString()
         }
 
@@ -555,7 +557,7 @@ class JsEngine(private val context: Context) {
         if (quickJs == null || !jsEnvironmentInitialized) {
             return JSONObject()
                 .put("success", false)
-                .put("error", "java bridge callback runtime unavailable")
+                .put("message", "java bridge callback runtime unavailable")
                 .toString()
         }
 
@@ -576,7 +578,7 @@ class JsEngine(private val context: Context) {
         } catch (e: Exception) {
             JSONObject()
                 .put("success", false)
-                .put("error", "java bridge callback wait failed: ${e.message ?: e.javaClass.simpleName}")
+                .put("message", "java bridge callback wait failed: ${e.message ?: e.javaClass.simpleName}")
                 .toString()
         } finally {
             pendingJsBridgeCallbackMap.remove(request.requestId)
@@ -641,7 +643,7 @@ class JsEngine(private val context: Context) {
             if (token is JSONObject) {
                 val success = token.optBoolean("success", false)
                 val data = token.opt("data")
-                val error = token.optString("error").ifBlank { null }
+                val error = token.optString("message").ifBlank { null }
                 if (success) {
                     Pair(null, data)
                 } else {
@@ -689,6 +691,7 @@ class JsEngine(private val context: Context) {
             params: Map<String, Any?>,
             envOverrides: Map<String, String> = emptyMap(),
             onIntermediateResult: ((Any?) -> Unit)? = null,
+            dispatchIntermediateOnMain: Boolean = true,
             timeoutSec: Long = JsTimeoutConfig.MAIN_TIMEOUT_SECONDS.toLong(),
             executionListener: JsExecutionListener? = null
     ): Any? {
@@ -738,7 +741,7 @@ class JsEngine(private val context: Context) {
                         details = "function=$functionName, plugin=$timingPluginId, success=false, reason=$failureReason"
                     )
                 }
-                return "Error: $failureReason"
+                return buildJsExecutionErrorPayload(failureReason)
             }
         }
 
@@ -751,6 +754,7 @@ class JsEngine(private val context: Context) {
                 params = effectiveParams,
                 envOverrides = envOverrides,
                 onIntermediateResult = onIntermediateResult,
+                dispatchIntermediateOnMain = dispatchIntermediateOnMain,
                 executionListener = executionListener
             )
         activeExecutionSessions[callId] = session
@@ -788,9 +792,9 @@ class JsEngine(private val context: Context) {
                     e
                 )
                 removeExecutionSession(callId)
-                session.executionListener?.onFailed(callId, "Error: ${e.message ?: "dispatch failed"}")
+                session.executionListener?.onFailed(callId, e.message ?: "dispatch failed")
                 if (!session.future.isDone) {
-                    session.future.complete("Error: ${e.message ?: "dispatch failed"}")
+                    session.future.complete(buildJsExecutionErrorPayload(e.message ?: "dispatch failed"))
                 }
             }
         )
@@ -800,14 +804,7 @@ class JsEngine(private val context: Context) {
         return try {
             preTimeoutTimer.schedule(
                 object : java.util.TimerTask() {
-                    override fun run() {
-                        if (!session.future.isDone) {
-                            AppLogger.d(
-                                TAG,
-                                "Pre-timeout warning triggered: callId=$callId, function=$functionName"
-                            )
-                        }
-                    }
+                    override fun run() {}
                 },
                 JsTimeoutConfig.PRE_TIMEOUT_SECONDS * 1000
             )
@@ -844,7 +841,7 @@ class JsEngine(private val context: Context) {
             )
             removeExecutionSession(callId)
             cancelExecutionSessionInJs(callId, failureReason)
-            session.executionListener?.onFailed(callId, "Error: $failureReason")
+            session.executionListener?.onFailed(callId, failureReason)
             if (shouldLogTiming) {
                 logMessageTiming(
                     stage = "toolpkg.jsEngine.waitResult",
@@ -857,7 +854,7 @@ class JsEngine(private val context: Context) {
                     details = "function=$functionName, plugin=$timingPluginId, callId=$callId, success=false, reason=$failureReason"
                 )
             }
-            "Error: $failureReason"
+            buildJsExecutionErrorPayload(failureReason)
         } finally {
             preTimeoutTimer.cancel()
         }
@@ -868,6 +865,7 @@ class JsEngine(private val context: Context) {
             params: Map<String, Any?> = emptyMap(),
             envOverrides: Map<String, String> = emptyMap(),
             onIntermediateResult: ((Any?) -> Unit)? = null,
+            dispatchIntermediateOnMain: Boolean = true,
             timeoutSec: Long = JsTimeoutConfig.MAIN_TIMEOUT_SECONDS.toLong(),
             executionListener: JsExecutionListener? = null
     ): Any? {
@@ -880,6 +878,7 @@ class JsEngine(private val context: Context) {
             params = directParams,
             envOverrides = envOverrides,
             onIntermediateResult = onIntermediateResult,
+            dispatchIntermediateOnMain = dispatchIntermediateOnMain,
             timeoutSec = timeoutSec,
             executionListener = executionListener
         )
@@ -933,789 +932,6 @@ class JsEngine(private val context: Context) {
             .ifBlank { null }
     }
 
-    private fun buildToolPkgGlobalBridgeHandleContextPath(handleId: String): String? {
-        val normalizedHandleId =
-            handleId
-                .trim()
-                .replace('\\', '/')
-                .trimStart('/')
-                .ifBlank { null }
-        return normalizedHandleId?.let { "__bridge_handles__/$it" }
-    }
-
-    private fun buildToolPkgGlobalBridgeError(message: String): String {
-        return JSONObject()
-            .put("success", false)
-            .put("error", message)
-            .toString()
-    }
-
-    private fun executeToolPkgGlobalBridgeScript(
-        packageTarget: String,
-        modulePath: String,
-        script: String,
-        timeoutSec: Long = 15L
-    ): String {
-        val normalizedTarget = packageTarget.trim()
-        if (normalizedTarget.isEmpty()) {
-            return buildToolPkgGlobalBridgeError("package/toolpkg runtime target is empty")
-        }
-        val normalizedModulePath =
-            normalizeToolPkgModulePath(modulePath)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg module path is empty")
-        val engine = packageManager.getToolPkgExecutionEngine("toolpkg_main:$normalizedTarget")
-        val result =
-            engine.executeScriptCode(
-                script = script,
-                params =
-                    mapOf(
-                        "__operit_ui_package_name" to normalizedTarget,
-                        "toolPkgId" to normalizedTarget,
-                        "containerPackageName" to normalizedTarget,
-                        "__operit_execution_context_key" to "toolpkg_main:$normalizedTarget",
-                        "__operit_script_screen" to normalizedModulePath
-                    ),
-                timeoutSec = timeoutSec
-            )
-        val text = result?.toString()?.trim().orEmpty()
-        if (text.isEmpty()) {
-            return buildToolPkgGlobalBridgeError("global toolpkg bridge returned empty result")
-        }
-        if (text.startsWith("Error:", ignoreCase = true)) {
-            return buildToolPkgGlobalBridgeError(
-                text.removePrefix("Error:").trim().ifBlank { "global toolpkg bridge failed" }
-            )
-        }
-        return text
-    }
-
-    private fun buildReadGlobalToolPkgModuleMemberScript(
-        modulePath: String,
-        memberPathJson: String
-    ): String {
-        val safeModuleSpecifier = JSONObject.quote("/${modulePath.trim().replace('\\', '/').trimStart('/')}")
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        return """
-            function __operitReadGlobalToolPkgModuleMember() {
-              function parseMemberPath(raw) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed.map(function(item) { return String(item); }) : [];
-                } catch (_error) {
-                  return [];
-                }
-              }
-              function readMemberValue(rootValue, memberPath) {
-                var current = rootValue;
-                for (var i = 0; i < memberPath.length; i += 1) {
-                  if (current == null) {
-                    return undefined;
-                  }
-                  current = current[memberPath[i]];
-                }
-                return current;
-              }
-              function describeValue(value) {
-                if (typeof value === 'undefined') {
-                  return { success: true, kind: 'undefined' };
-                }
-                if (value === null) {
-                  return { success: true, kind: 'null' };
-                }
-                var valueType = typeof value;
-                if (valueType === 'function') {
-                  return {
-                    success: true,
-                    kind: 'function',
-                    keys: Object.keys(value || {}),
-                    isAsync: !!(
-                      value &&
-                      value.constructor &&
-                      typeof value.constructor.name === 'string' &&
-                      value.constructor.name === 'AsyncFunction'
-                    )
-                  };
-                }
-                if (Array.isArray(value)) {
-                  return {
-                    success: true,
-                    kind: 'array',
-                    keys: Object.keys(value),
-                    length: Number(value.length) || 0
-                  };
-                }
-                if (valueType === 'object') {
-                  return {
-                    success: true,
-                    kind: 'object',
-                    keys: Object.keys(value || {})
-                  };
-                }
-                if (
-                  valueType === 'string' ||
-                  valueType === 'number' ||
-                  valueType === 'boolean'
-                ) {
-                  return {
-                    success: true,
-                    kind: 'primitive',
-                    value: value
-                  };
-                }
-                return {
-                  success: true,
-                  kind: 'primitive',
-                  value: String(value)
-                };
-              }
-              var moduleExports = require($safeModuleSpecifier);
-              var memberPath = parseMemberPath($safeMemberPathJson);
-              return describeValue(readMemberValue(moduleExports, memberPath));
-            }
-            return __operitReadGlobalToolPkgModuleMember();
-        """.trimIndent()
-    }
-
-    private fun buildInvokeGlobalToolPkgModuleFunctionScript(
-        modulePath: String,
-        memberPathJson: String,
-        argsJson: String
-    ): String {
-        val safeModuleSpecifier = JSONObject.quote("/${modulePath.trim().replace('\\', '/').trimStart('/')}")
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        val safeArgsJson = JSONObject.quote(argsJson.trim().ifBlank { "[]" })
-        return """
-            async function __operitInvokeGlobalToolPkgModuleFunction() {
-              function parseArrayJson(raw, fallback) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed : fallback;
-                } catch (_error) {
-                  return fallback;
-                }
-              }
-              function getBridgeStore() {
-                var root =
-                  typeof globalThis !== 'undefined'
-                    ? globalThis
-                    : (typeof window !== 'undefined' ? window : this);
-                var store = root.__operitToolPkgBridgeReturnStore;
-                if (!store || typeof store !== 'object') {
-                  store = {
-                    nextId: 1,
-                    values: Object.create(null),
-                    objectIds: typeof WeakMap === 'function' ? new WeakMap() : null
-                  };
-                  root.__operitToolPkgBridgeReturnStore = store;
-                }
-                if (!store.values || typeof store.values !== 'object') {
-                  store.values = Object.create(null);
-                }
-                if (
-                  !store.objectIds &&
-                  typeof WeakMap === 'function'
-                ) {
-                  store.objectIds = new WeakMap();
-                }
-                store.nextId = Number(store.nextId) || 1;
-                return store;
-              }
-              function storeBridgeValue(value) {
-                if (value == null) {
-                  return '';
-                }
-                var valueType = typeof value;
-                if (valueType !== 'object' && valueType !== 'function') {
-                  return '';
-                }
-                var store = getBridgeStore();
-                var existingId = '';
-                if (store.objectIds && typeof store.objectIds.get === 'function') {
-                  existingId = String(store.objectIds.get(value) || '');
-                }
-                if (existingId && store.values[existingId]) {
-                  return existingId;
-                }
-                var handleId = 'bridge_' + String(store.nextId++);
-                store.values[handleId] = value;
-                if (store.objectIds && typeof store.objectIds.set === 'function') {
-                  store.objectIds.set(value, handleId);
-                }
-                return handleId;
-              }
-              function describeValue(value) {
-                if (typeof value === 'undefined') {
-                  return { success: true, kind: 'undefined' };
-                }
-                if (value === null) {
-                  return { success: true, kind: 'null' };
-                }
-                var valueType = typeof value;
-                if (valueType === 'function') {
-                  return {
-                    success: true,
-                    kind: 'function',
-                    keys: Object.keys(value || {}),
-                    isAsync: !!(
-                      value &&
-                      value.constructor &&
-                      typeof value.constructor.name === 'string' &&
-                      value.constructor.name === 'AsyncFunction'
-                    ),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (Array.isArray(value)) {
-                  return {
-                    success: true,
-                    kind: 'array',
-                    keys: Object.keys(value),
-                    length: Number(value.length) || 0,
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (valueType === 'object') {
-                  return {
-                    success: true,
-                    kind: 'object',
-                    keys: Object.keys(value || {}),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (
-                  valueType === 'string' ||
-                  valueType === 'number' ||
-                  valueType === 'boolean'
-                ) {
-                  return {
-                    success: true,
-                    kind: 'primitive',
-                    value: value
-                  };
-                }
-                return {
-                  success: true,
-                  kind: 'primitive',
-                  value: String(value)
-                };
-              }
-              var moduleExports = require($safeModuleSpecifier);
-              var memberPath = parseArrayJson($safeMemberPathJson, []).map(function(item) { return String(item); });
-              var args = parseArrayJson($safeArgsJson, []);
-              var current = moduleExports;
-              var owner = null;
-              for (var i = 0; i < memberPath.length; i += 1) {
-                owner = current;
-                if (current == null) {
-                  throw new Error('global module member is undefined: ' + memberPath.join('.'));
-                }
-                current = current[memberPath[i]];
-              }
-              if (typeof current !== 'function') {
-                throw new Error('global module member is not a function: ' + memberPath.join('.'));
-              }
-              var result = current.apply(owner, args);
-              if (result && typeof result.then === 'function') {
-                result = await result;
-              }
-              return describeValue(result);
-            }
-            return await __operitInvokeGlobalToolPkgModuleFunction();
-        """.trimIndent()
-    }
-
-    private fun buildReadGlobalToolPkgHandleMemberScript(
-        handleId: String,
-        memberPathJson: String
-    ): String {
-        val safeHandleId = JSONObject.quote(handleId.trim())
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        return """
-            function __operitReadGlobalToolPkgHandleMember() {
-              function parseMemberPath(raw) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed.map(function(item) { return String(item); }) : [];
-                } catch (_error) {
-                  return [];
-                }
-              }
-              function getBridgeStore() {
-                var root =
-                  typeof globalThis !== 'undefined'
-                    ? globalThis
-                    : (typeof window !== 'undefined' ? window : this);
-                var store = root.__operitToolPkgBridgeReturnStore;
-                if (!store || typeof store !== 'object' || !store.values || typeof store.values !== 'object') {
-                  throw new Error('global toolpkg bridge return store is unavailable');
-                }
-                return store;
-              }
-              function readHandleValue(id) {
-                var store = getBridgeStore();
-                return store.values[String(id || '')];
-              }
-              function storeBridgeValue(value) {
-                if (value == null) {
-                  return '';
-                }
-                var valueType = typeof value;
-                if (valueType !== 'object' && valueType !== 'function') {
-                  return '';
-                }
-                var store = getBridgeStore();
-                var existingId = '';
-                if (store.objectIds && typeof store.objectIds.get === 'function') {
-                  existingId = String(store.objectIds.get(value) || '');
-                }
-                if (existingId && store.values[existingId]) {
-                  return existingId;
-                }
-                store.nextId = Number(store.nextId) || 1;
-                var handleId = 'bridge_' + String(store.nextId++);
-                store.values[handleId] = value;
-                if (store.objectIds && typeof store.objectIds.set === 'function') {
-                  store.objectIds.set(value, handleId);
-                }
-                return handleId;
-              }
-              function readMemberValue(rootValue, memberPath) {
-                var current = rootValue;
-                for (var i = 0; i < memberPath.length; i += 1) {
-                  if (current == null) {
-                    return undefined;
-                  }
-                  current = current[memberPath[i]];
-                }
-                return current;
-              }
-              function describeValue(value) {
-                if (typeof value === 'undefined') {
-                  return { success: true, kind: 'undefined' };
-                }
-                if (value === null) {
-                  return { success: true, kind: 'null' };
-                }
-                var valueType = typeof value;
-                if (valueType === 'function') {
-                  return {
-                    success: true,
-                    kind: 'function',
-                    keys: Object.keys(value || {}),
-                    isAsync: !!(
-                      value &&
-                      value.constructor &&
-                      typeof value.constructor.name === 'string' &&
-                      value.constructor.name === 'AsyncFunction'
-                    ),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (Array.isArray(value)) {
-                  return {
-                    success: true,
-                    kind: 'array',
-                    keys: Object.keys(value),
-                    length: Number(value.length) || 0,
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (valueType === 'object') {
-                  return {
-                    success: true,
-                    kind: 'object',
-                    keys: Object.keys(value || {}),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (
-                  valueType === 'string' ||
-                  valueType === 'number' ||
-                  valueType === 'boolean'
-                ) {
-                  return {
-                    success: true,
-                    kind: 'primitive',
-                    value: value
-                  };
-                }
-                return {
-                  success: true,
-                  kind: 'primitive',
-                  value: String(value)
-                };
-              }
-              var handleValue = readHandleValue($safeHandleId);
-              if (typeof handleValue === 'undefined') {
-                throw new Error('global toolpkg bridge handle is unavailable: ' + $safeHandleId);
-              }
-              var memberPath = parseMemberPath($safeMemberPathJson);
-              return describeValue(readMemberValue(handleValue, memberPath));
-            }
-            return __operitReadGlobalToolPkgHandleMember();
-        """.trimIndent()
-    }
-
-    private fun buildInvokeGlobalToolPkgHandleFunctionScript(
-        handleId: String,
-        memberPathJson: String,
-        argsJson: String
-    ): String {
-        val safeHandleId = JSONObject.quote(handleId.trim())
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        val safeArgsJson = JSONObject.quote(argsJson.trim().ifBlank { "[]" })
-        return """
-            async function __operitInvokeGlobalToolPkgHandleFunction() {
-              function parseArrayJson(raw, fallback) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed : fallback;
-                } catch (_error) {
-                  return fallback;
-                }
-              }
-              function getBridgeStore() {
-                var root =
-                  typeof globalThis !== 'undefined'
-                    ? globalThis
-                    : (typeof window !== 'undefined' ? window : this);
-                var store = root.__operitToolPkgBridgeReturnStore;
-                if (!store || typeof store !== 'object' || !store.values || typeof store.values !== 'object') {
-                  throw new Error('global toolpkg bridge return store is unavailable');
-                }
-                return store;
-              }
-              function readHandleValue(id) {
-                var store = getBridgeStore();
-                return store.values[String(id || '')];
-              }
-              function storeBridgeValue(value) {
-                if (value == null) {
-                  return '';
-                }
-                var valueType = typeof value;
-                if (valueType !== 'object' && valueType !== 'function') {
-                  return '';
-                }
-                var store = getBridgeStore();
-                var existingId = '';
-                if (store.objectIds && typeof store.objectIds.get === 'function') {
-                  existingId = String(store.objectIds.get(value) || '');
-                }
-                if (existingId && store.values[existingId]) {
-                  return existingId;
-                }
-                store.nextId = Number(store.nextId) || 1;
-                var nextHandleId = 'bridge_' + String(store.nextId++);
-                store.values[nextHandleId] = value;
-                if (store.objectIds && typeof store.objectIds.set === 'function') {
-                  store.objectIds.set(value, nextHandleId);
-                }
-                return nextHandleId;
-              }
-              function describeValue(value) {
-                if (typeof value === 'undefined') {
-                  return { success: true, kind: 'undefined' };
-                }
-                if (value === null) {
-                  return { success: true, kind: 'null' };
-                }
-                var valueType = typeof value;
-                if (valueType === 'function') {
-                  return {
-                    success: true,
-                    kind: 'function',
-                    keys: Object.keys(value || {}),
-                    isAsync: !!(
-                      value &&
-                      value.constructor &&
-                      typeof value.constructor.name === 'string' &&
-                      value.constructor.name === 'AsyncFunction'
-                    ),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (Array.isArray(value)) {
-                  return {
-                    success: true,
-                    kind: 'array',
-                    keys: Object.keys(value),
-                    length: Number(value.length) || 0,
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (valueType === 'object') {
-                  return {
-                    success: true,
-                    kind: 'object',
-                    keys: Object.keys(value || {}),
-                    handleId: storeBridgeValue(value)
-                  };
-                }
-                if (
-                  valueType === 'string' ||
-                  valueType === 'number' ||
-                  valueType === 'boolean'
-                ) {
-                  return {
-                    success: true,
-                    kind: 'primitive',
-                    value: value
-                  };
-                }
-                return {
-                  success: true,
-                  kind: 'primitive',
-                  value: String(value)
-                };
-              }
-              var current = readHandleValue($safeHandleId);
-              if (typeof current === 'undefined') {
-                throw new Error('global toolpkg bridge handle is unavailable: ' + $safeHandleId);
-              }
-              var memberPath = parseArrayJson($safeMemberPathJson, []).map(function(item) { return String(item); });
-              var args = parseArrayJson($safeArgsJson, []);
-              var owner = null;
-              for (var i = 0; i < memberPath.length; i += 1) {
-                owner = current;
-                if (current == null) {
-                  throw new Error('global toolpkg bridge handle member is undefined: ' + memberPath.join('.'));
-                }
-                current = current[memberPath[i]];
-              }
-              if (typeof current !== 'function') {
-                throw new Error('global toolpkg bridge handle member is not a function: ' + memberPath.join('.'));
-              }
-              var result = current.apply(owner, args);
-              if (result && typeof result.then === 'function') {
-                result = await result;
-              }
-              return describeValue(result);
-            }
-            return await __operitInvokeGlobalToolPkgHandleFunction();
-        """.trimIndent()
-    }
-
-    private fun buildWriteGlobalToolPkgHandleMemberScript(
-        handleId: String,
-        memberPathJson: String,
-        valueJson: String
-    ): String {
-        val safeHandleId = JSONObject.quote(handleId.trim())
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        val safeValueJson = JSONObject.quote(valueJson)
-        return """
-            function __operitWriteGlobalToolPkgHandleMember() {
-              function parseMemberPath(raw) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed.map(function(item) { return String(item); }) : [];
-                } catch (_error) {
-                  return [];
-                }
-              }
-              function getBridgeStore() {
-                var root =
-                  typeof globalThis !== 'undefined'
-                    ? globalThis
-                    : (typeof window !== 'undefined' ? window : this);
-                var store = root.__operitToolPkgBridgeReturnStore;
-                if (!store || typeof store !== 'object' || !store.values || typeof store.values !== 'object') {
-                  throw new Error('global toolpkg bridge return store is unavailable');
-                }
-                return store;
-              }
-              function readHandleValue(id) {
-                var store = getBridgeStore();
-                return store.values[String(id || '')];
-              }
-              var memberPath = parseMemberPath($safeMemberPathJson);
-              if (memberPath.length === 0) {
-                throw new Error('cannot overwrite global toolpkg bridge handle root');
-              }
-              var current = readHandleValue($safeHandleId);
-              if (typeof current === 'undefined') {
-                throw new Error('global toolpkg bridge handle is unavailable: ' + $safeHandleId);
-              }
-              for (var i = 0; i < memberPath.length - 1; i += 1) {
-                if (current == null) {
-                  throw new Error('global toolpkg bridge handle member parent is undefined: ' + memberPath.join('.'));
-                }
-                current = current[memberPath[i]];
-              }
-              if (current == null) {
-                throw new Error('global toolpkg bridge handle member parent is undefined: ' + memberPath.join('.'));
-              }
-              current[memberPath[memberPath.length - 1]] = JSON.parse($safeValueJson);
-              return { success: true };
-            }
-            return __operitWriteGlobalToolPkgHandleMember();
-        """.trimIndent()
-    }
-
-    private fun buildWriteGlobalToolPkgModuleMemberScript(
-        modulePath: String,
-        memberPathJson: String,
-        valueJson: String
-    ): String {
-        val safeModuleSpecifier = JSONObject.quote("/${modulePath.trim().replace('\\', '/').trimStart('/')}")
-        val safeMemberPathJson = JSONObject.quote(memberPathJson.trim().ifBlank { "[]" })
-        val safeValueJson = JSONObject.quote(valueJson)
-        return """
-            function __operitWriteGlobalToolPkgModuleMember() {
-              function parseMemberPath(raw) {
-                try {
-                  var parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed.map(function(item) { return String(item); }) : [];
-                } catch (_error) {
-                  return [];
-                }
-              }
-              var memberPath = parseMemberPath($safeMemberPathJson);
-              if (memberPath.length === 0) {
-                throw new Error('cannot overwrite global module root export');
-              }
-              var nextValue = JSON.parse($safeValueJson);
-              var moduleExports = require($safeModuleSpecifier);
-              var current = moduleExports;
-              for (var i = 0; i < memberPath.length - 1; i += 1) {
-                if (current == null) {
-                  throw new Error('global module member parent is undefined: ' + memberPath.join('.'));
-                }
-                current = current[memberPath[i]];
-              }
-              if (current == null) {
-                throw new Error('global module member parent is undefined: ' + memberPath.join('.'));
-              }
-              current[memberPath[memberPath.length - 1]] = nextValue;
-              return { success: true };
-            }
-            return __operitWriteGlobalToolPkgModuleMember();
-        """.trimIndent()
-    }
-
-    internal fun readGlobalToolPkgModuleMember(
-        packageTarget: String,
-        modulePath: String,
-        memberPathJson: String
-    ): String {
-        val normalizedModulePath =
-            normalizeToolPkgModulePath(modulePath)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg module path is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = normalizedModulePath,
-            script =
-                buildReadGlobalToolPkgModuleMemberScript(
-                    modulePath = normalizedModulePath,
-                    memberPathJson = memberPathJson
-                )
-        )
-    }
-
-    internal fun invokeGlobalToolPkgModuleFunction(
-        packageTarget: String,
-        modulePath: String,
-        memberPathJson: String,
-        argsJson: String
-    ): String {
-        val normalizedModulePath =
-            normalizeToolPkgModulePath(modulePath)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg module path is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = normalizedModulePath,
-            script =
-                buildInvokeGlobalToolPkgModuleFunctionScript(
-                    modulePath = normalizedModulePath,
-                    memberPathJson = memberPathJson,
-                    argsJson = argsJson
-                )
-        )
-    }
-
-    internal fun writeGlobalToolPkgModuleMember(
-        packageTarget: String,
-        modulePath: String,
-        memberPathJson: String,
-        valueJson: String
-    ): String {
-        val normalizedModulePath =
-            normalizeToolPkgModulePath(modulePath)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg module path is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = normalizedModulePath,
-            script =
-                buildWriteGlobalToolPkgModuleMemberScript(
-                    modulePath = normalizedModulePath,
-                    memberPathJson = memberPathJson,
-                    valueJson = valueJson
-                )
-        )
-    }
-
-    internal fun readGlobalToolPkgHandleMember(
-        packageTarget: String,
-        handleId: String,
-        memberPathJson: String
-    ): String {
-        val contextPath =
-            buildToolPkgGlobalBridgeHandleContextPath(handleId)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg bridge handle id is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = contextPath,
-            script =
-                buildReadGlobalToolPkgHandleMemberScript(
-                    handleId = handleId,
-                    memberPathJson = memberPathJson
-                )
-        )
-    }
-
-    internal fun invokeGlobalToolPkgHandleFunction(
-        packageTarget: String,
-        handleId: String,
-        memberPathJson: String,
-        argsJson: String
-    ): String {
-        val contextPath =
-            buildToolPkgGlobalBridgeHandleContextPath(handleId)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg bridge handle id is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = contextPath,
-            script =
-                buildInvokeGlobalToolPkgHandleFunctionScript(
-                    handleId = handleId,
-                    memberPathJson = memberPathJson,
-                    argsJson = argsJson
-                )
-        )
-    }
-
-    internal fun writeGlobalToolPkgHandleMember(
-        packageTarget: String,
-        handleId: String,
-        memberPathJson: String,
-        valueJson: String
-    ): String {
-        val contextPath =
-            buildToolPkgGlobalBridgeHandleContextPath(handleId)
-                ?: return buildToolPkgGlobalBridgeError("toolpkg bridge handle id is empty")
-        return executeToolPkgGlobalBridgeScript(
-            packageTarget = packageTarget,
-            modulePath = contextPath,
-            script =
-                buildWriteGlobalToolPkgHandleMemberScript(
-                    handleId = handleId,
-                    memberPathJson = memberPathJson,
-                    valueJson = valueJson
-                )
-        )
-    }
-
     fun executeToolPkgMainRegistrationFunction(
         script: String,
         functionName: String,
@@ -1760,7 +976,7 @@ class JsEngine(private val context: Context) {
     ): Any? {
         val normalizedActionId = actionId.trim()
         if (normalizedActionId.isBlank()) {
-            return "Error: compose action id is required"
+            return buildJsExecutionErrorPayload("compose action id is required")
         }
         val params = runtimeOptions.toMutableMap()
         params["__action_id"] = normalizedActionId
@@ -1773,6 +989,18 @@ class JsEngine(private val context: Context) {
                 params = params,
                 envOverrides = envOverrides,
                 onIntermediateResult = onIntermediateResult
+        )
+    }
+
+    fun rerenderComposeDslTree(
+            runtimeOptions: Map<String, Any?> = emptyMap(),
+            envOverrides: Map<String, String> = emptyMap()
+    ): Any? {
+        return executeScriptFunction(
+                script = "",
+                functionName = "__operit_rerender_compose_dsl",
+                params = runtimeOptions,
+                envOverrides = envOverrides
         )
     }
 
@@ -1813,12 +1041,7 @@ class JsEngine(private val context: Context) {
                     return@Thread
                 }
 
-            val errorText =
-                result?.toString()
-                    ?.takeIf { it.startsWith("Error:", ignoreCase = true) }
-                    ?.removePrefix("Error:")
-                    ?.trim()
-                    ?.ifBlank { "compose action dispatch failed" }
+            val errorText = extractJsExecutionErrorMessage(result)
             ContextCompat.getMainExecutor(context).execute {
                 if (errorText != null) {
                     AppLogger.e(
@@ -1853,7 +1076,7 @@ class JsEngine(private val context: Context) {
             AppLogger.e(TAG, "Failed to expose NativeInterface bridge object: ${error.message}", error)
             JSONObject()
                 .put("success", false)
-                .put("error", error.message ?: "failed to expose NativeInterface bridge object")
+                .put("message", error.message ?: "failed to expose NativeInterface bridge object")
                 .toString()
         }
     }
@@ -1886,8 +1109,214 @@ class JsEngine(private val context: Context) {
         )
     }
 
+    private fun buildToolPkgIpcFailure(message: String): String =
+        JSONObject()
+            .put("success", false)
+            .put("message", message)
+            .toString()
+
+    private fun inferToolPkgIpcRuntimeFromContextKey(contextKey: String): String {
+        val normalized = contextKey.trim().lowercase()
+        return when {
+            normalized.startsWith("toolpkg_main:") -> "main"
+            normalized.startsWith("toolpkg_provider:") -> "provider"
+            normalized.startsWith("toolpkg_compose_dsl:") -> "ui"
+            normalized.startsWith("toolpkg_xml_render:") -> "ui"
+            else -> ""
+        }
+    }
+
+    private fun invokeToolPkgIpc(
+        packageTarget: String,
+        callerContextKey: String,
+        targetContextKey: String,
+        targetRuntime: String,
+        channel: String,
+        payloadJson: String
+    ): String {
+        val normalizedTarget = packageTarget.trim()
+        if (normalizedTarget.isEmpty()) {
+            return buildToolPkgIpcFailure("ToolPkg.ipc package target is empty")
+        }
+        val normalizedChannel = channel.trim()
+        if (normalizedChannel.isEmpty()) {
+            return buildToolPkgIpcFailure("ToolPkg.ipc channel is required")
+        }
+        val requestedRuntime = targetRuntime.trim().lowercase()
+        if (
+            requestedRuntime.isNotEmpty() &&
+                requestedRuntime != "main" &&
+                requestedRuntime != "ui" &&
+                requestedRuntime != "sandbox" &&
+                requestedRuntime != "provider"
+        ) {
+            return buildToolPkgIpcFailure("ToolPkg.ipc targetRuntime is invalid: $requestedRuntime")
+        }
+        packageManager.ensureInitialized()
+        val containerRuntime =
+            packageManager.toolPkgContainersInternal[normalizedTarget]
+                ?: return buildToolPkgIpcFailure("ToolPkg container not found: $normalizedTarget")
+        val explicitTargetContextKey = targetContextKey.trim()
+        val resolvedTargetContextKey =
+            if (explicitTargetContextKey.isNotEmpty()) {
+                explicitTargetContextKey
+            } else if (requestedRuntime.isEmpty() || requestedRuntime == "main") {
+                "toolpkg_main:$normalizedTarget"
+            } else {
+                return buildToolPkgIpcFailure(
+                    "ToolPkg.ipc targetContextKey is required for targetRuntime=$requestedRuntime"
+                )
+            }
+        val inferredRuntime = inferToolPkgIpcRuntimeFromContextKey(resolvedTargetContextKey)
+        if (
+            requestedRuntime.isNotEmpty() &&
+                inferredRuntime.isNotEmpty() &&
+                requestedRuntime != inferredRuntime
+        ) {
+            return buildToolPkgIpcFailure(
+                "ToolPkg.ipc targetRuntime does not match targetContextKey: $requestedRuntime != $inferredRuntime"
+            )
+        }
+        val resolvedTargetRuntime =
+            if (requestedRuntime.isNotEmpty()) {
+                requestedRuntime
+            } else if (inferredRuntime.isNotEmpty()) {
+                inferredRuntime
+            } else {
+                return buildToolPkgIpcFailure(
+                    "ToolPkg.ipc targetRuntime is required for targetContextKey=$resolvedTargetContextKey"
+                )
+            }
+        val isMainTarget = resolvedTargetRuntime == "main"
+        if (isMainTarget && !resolvedTargetContextKey.equals("toolpkg_main:$normalizedTarget", ignoreCase = true)) {
+            return buildToolPkgIpcFailure(
+                "ToolPkg.ipc main targetContextKey is invalid: $resolvedTargetContextKey"
+            )
+        }
+        if (!isMainTarget && explicitTargetContextKey.isEmpty()) {
+            return buildToolPkgIpcFailure(
+                "ToolPkg.ipc targetContextKey is required for targetRuntime=$resolvedTargetRuntime"
+            )
+        }
+        val engine =
+            if (isMainTarget) {
+                packageManager.getToolPkgExecutionEngine(resolvedTargetContextKey)
+            } else {
+                packageManager.findToolPkgExecutionEngine(resolvedTargetContextKey)
+                    ?: return buildToolPkgIpcFailure(
+                        "ToolPkg.ipc target runtime is not active: $resolvedTargetContextKey"
+                    )
+            }
+        var scriptPath = ""
+        var script = ""
+        if (isMainTarget) {
+            scriptPath = containerRuntime.mainEntry.trim()
+            if (scriptPath.isEmpty()) {
+                return buildToolPkgIpcFailure("ToolPkg main entry is unavailable: $normalizedTarget")
+            }
+            script =
+                packageManager.getToolPkgMainScriptInternal(normalizedTarget)
+                    ?: return buildToolPkgIpcFailure(
+                        "ToolPkg main script is unavailable: $normalizedTarget"
+                    )
+        }
+        val dispatchFunctionName = "__operit_toolpkg_runtime_dispatch__"
+        val dispatchFunctionSource =
+            """
+                async function(params) {
+                    var dispatch = globalThis.__operitInvokeToolPkgIpcLocal;
+                    if (typeof dispatch !== 'function') {
+                        throw new Error('ToolPkg.ipc runtime is unavailable in target context');
+                    }
+                    var payloadJson =
+                        params && typeof params.__operit_toolpkg_ipc_payload_json === 'string'
+                            ? params.__operit_toolpkg_ipc_payload_json
+                            : 'null';
+                    var payload;
+                    try {
+                        payload = JSON.parse(payloadJson);
+                    } catch (error) {
+                        throw new Error(
+                            'ToolPkg.ipc payload JSON is invalid: ' +
+                            String(error && error.message ? error.message : error)
+                        );
+                    }
+                    var channel =
+                        params && typeof params.__operit_toolpkg_ipc_channel === 'string'
+                            ? params.__operit_toolpkg_ipc_channel.trim()
+                            : '';
+                    if (!channel) {
+                        throw new Error('ToolPkg.ipc channel is required');
+                    }
+                    var callerContextKey =
+                        params && typeof params.__operit_toolpkg_ipc_caller_context_key === 'string'
+                            ? params.__operit_toolpkg_ipc_caller_context_key
+                            : '';
+                    var currentContextKey =
+                        params && typeof params.__operit_execution_context_key === 'string'
+                            ? params.__operit_execution_context_key
+                            : '';
+                    var packageTarget =
+                        params && typeof params.__operit_ui_package_name === 'string'
+                            ? params.__operit_ui_package_name
+                            : '';
+                    var currentRuntime =
+                        params && typeof params.__operit_toolpkg_runtime_kind === 'string'
+                            ? params.__operit_toolpkg_runtime_kind.trim()
+                            : '';
+                    return await dispatch(channel, payload, {
+                        channel: channel,
+                        callerContextKey: callerContextKey,
+                        currentContextKey: currentContextKey,
+                        currentRuntime: currentRuntime,
+                        packageTarget: packageTarget
+                    });
+                }
+            """.trimIndent()
+        return try {
+            val result =
+                engine.executeScriptFunction(
+                    script = script,
+                    functionName = dispatchFunctionName,
+                    params =
+                        mapOf(
+                            "__operit_ui_package_name" to normalizedTarget,
+                            "toolPkgId" to normalizedTarget,
+                            "containerPackageName" to normalizedTarget,
+                            "__operit_execution_context_key" to resolvedTargetContextKey,
+                            "__operit_toolpkg_runtime_kind" to resolvedTargetRuntime,
+                            "__operit_script_screen" to scriptPath,
+                            "__operit_inline_function_name" to dispatchFunctionName,
+                            "__operit_inline_function_source" to dispatchFunctionSource,
+                            "__operit_toolpkg_ipc_channel" to normalizedChannel,
+                            "__operit_toolpkg_ipc_payload_json" to payloadJson.trim().ifEmpty { "null" },
+                            "__operit_toolpkg_ipc_caller_context_key" to callerContextKey.trim()
+                        ),
+                    timeoutSec = 15L
+                )
+            val errorMessage = extractJsExecutionErrorMessage(result)
+            if (errorMessage != null) {
+                JSONObject()
+                    .put("success", false)
+                    .put("message", errorMessage)
+                    .toString()
+            } else {
+                val decodedResult = decodeJsExecutionResultValue(result)
+                JSONObject()
+                    .put("success", true)
+                    .put("value", decodedResult ?: JSONObject.NULL)
+                    .toString()
+            }
+        } catch (error: Exception) {
+            AppLogger.e(TAG, "ToolPkg.ipc runtime invoke failed: ${error.message}", error)
+            JSONObject()
+                .put("success", false)
+                .put("message", error.message ?: "ToolPkg.ipc runtime invoke failed")
+                .toString()
+        }
+    }
+
     fun cancelCurrentExecution(reason: String = "Execution canceled: requested by caller") {
-        AppLogger.d(TAG, "Cancel current JS execution: $reason")
         resetState(cancellationMessage = reason)
     }
 
@@ -1910,7 +1339,7 @@ class JsEngine(private val context: Context) {
         matchingSessions.forEach { session ->
             removeExecutionSession(session.callId)
             if (!session.future.isDone) {
-                session.future.complete("Error: $reason")
+                session.future.complete(buildJsExecutionErrorPayload(reason))
             }
             cancelExecutionSessionInJs(
                 callId = session.callId,
@@ -2108,89 +1537,40 @@ class JsEngine(private val context: Context) {
         }
 
         @JavascriptInterface
-        fun readGlobalToolPkgModuleMember(
+        fun invokeToolPkgIpcAsync(
+            callbackId: String,
             packageTarget: String,
-            modulePath: String,
-            memberPathJson: String
-        ): String {
-            return this@JsEngine.readGlobalToolPkgModuleMember(
-                packageTarget = packageTarget,
-                modulePath = modulePath,
-                memberPathJson = memberPathJson
-            )
-        }
-
-        @JavascriptInterface
-        fun invokeGlobalToolPkgModuleFunction(
-            packageTarget: String,
-            modulePath: String,
-            memberPathJson: String,
-            argsJson: String
-        ): String {
-            return this@JsEngine.invokeGlobalToolPkgModuleFunction(
-                packageTarget = packageTarget,
-                modulePath = modulePath,
-                memberPathJson = memberPathJson,
-                argsJson = argsJson
-            )
-        }
-
-        @JavascriptInterface
-        fun writeGlobalToolPkgModuleMember(
-            packageTarget: String,
-            modulePath: String,
-            memberPathJson: String,
-            valueJson: String
-        ): String {
-            return this@JsEngine.writeGlobalToolPkgModuleMember(
-                packageTarget = packageTarget,
-                modulePath = modulePath,
-                memberPathJson = memberPathJson,
-                valueJson = valueJson
-            )
-        }
-
-        @JavascriptInterface
-        fun readGlobalToolPkgHandleMember(
-            packageTarget: String,
-            handleId: String,
-            memberPathJson: String
-        ): String {
-            return this@JsEngine.readGlobalToolPkgHandleMember(
-                packageTarget = packageTarget,
-                handleId = handleId,
-                memberPathJson = memberPathJson
-            )
-        }
-
-        @JavascriptInterface
-        fun invokeGlobalToolPkgHandleFunction(
-            packageTarget: String,
-            handleId: String,
-            memberPathJson: String,
-            argsJson: String
-        ): String {
-            return this@JsEngine.invokeGlobalToolPkgHandleFunction(
-                packageTarget = packageTarget,
-                handleId = handleId,
-                memberPathJson = memberPathJson,
-                argsJson = argsJson
-            )
-        }
-
-        @JavascriptInterface
-        fun writeGlobalToolPkgHandleMember(
-            packageTarget: String,
-            handleId: String,
-            memberPathJson: String,
-            valueJson: String
-        ): String {
-            return this@JsEngine.writeGlobalToolPkgHandleMember(
-                packageTarget = packageTarget,
-                handleId = handleId,
-                memberPathJson = memberPathJson,
-                valueJson = valueJson
-            )
+            callerContextKey: String,
+            targetContextKey: String,
+            targetRuntime: String,
+            channel: String,
+            payloadJson: String
+        ) {
+            val normalizedCallback = callbackId.trim()
+            if (normalizedCallback.isEmpty()) {
+                return
+            }
+            Thread {
+                try {
+                    val resultJson =
+                        invokeToolPkgIpc(
+                            packageTarget = packageTarget,
+                            callerContextKey = callerContextKey,
+                            targetContextKey = targetContextKey,
+                            targetRuntime = targetRuntime,
+                            channel = channel,
+                            payloadJson = payloadJson
+                        )
+                    sendToolPkgIpcResult(normalizedCallback, resultJson, false)
+                } catch (error: Throwable) {
+                    AppLogger.e(TAG, "ToolPkg.ipc async invoke failed: ${error.message}", error)
+                    sendToolPkgIpcResult(
+                        normalizedCallback,
+                        error.message?.trim().orEmpty().ifBlank { "ToolPkg.ipc async invoke failed" },
+                        true
+                    )
+                }
+            }.start()
         }
 
         @JavascriptInterface
@@ -2247,13 +1627,38 @@ class JsEngine(private val context: Context) {
                     )
                     sendToolResult(
                         normalizedCallback,
-                        error.message?.trim().orEmpty().ifBlank {
-                            "compose webview controller command failed"
-                        },
+                        buildJsExecutionErrorPayload(
+                            error.message?.trim().orEmpty().ifBlank {
+                                "compose webview controller command failed"
+                            }
+                        ),
                         true
                     )
                 }
             }.start()
+        }
+
+        @JavascriptInterface
+        fun composeOpenFilePickerSuspend(payloadJson: String, callbackId: String) {
+            val normalizedCallback = callbackId.trim()
+            if (normalizedCallback.isEmpty()) {
+                return
+            }
+            ComposeDslFilePickerHostRegistry.openPicker(
+                payloadJson = payloadJson,
+                onSuccess = { result ->
+                    sendToolResult(normalizedCallback, result, false)
+                },
+                onError = { errorMessage ->
+                    sendToolResult(
+                        normalizedCallback,
+                        buildJsExecutionErrorPayload(
+                            errorMessage.trim().ifBlank { "compose file picker failed" }
+                        ),
+                        true
+                    )
+                }
+            )
         }
 
         private fun buildRoutesJson(includeOnlyNative: Boolean): String {
@@ -2316,6 +1721,16 @@ class JsEngine(private val context: Context) {
         @JavascriptInterface
         fun registerToolPkgInputMenuTogglePlugin(specJson: String) {
             toolPkgRegistrationSession.appendInputMenuTogglePlugin(specJson)
+        }
+
+        @JavascriptInterface
+        fun registerToolPkgChatInputHook(specJson: String) {
+            toolPkgRegistrationSession.appendChatInputHook(specJson)
+        }
+
+        @JavascriptInterface
+        fun registerToolPkgChatViewHook(specJson: String) {
+            toolPkgRegistrationSession.appendChatViewHook(specJson)
         }
 
         @JavascriptInterface
@@ -2391,7 +1806,7 @@ class JsEngine(private val context: Context) {
                 AppLogger.e(TAG, "$failureLabel: ${e.message}", e)
                 JSONObject()
                     .put("success", false)
-                    .put("error", e.message ?: failureLabel.lowercase())
+                    .put("message", e.message ?: failureLabel.lowercase())
                     .toString()
             }
         }
@@ -2474,9 +1889,9 @@ class JsEngine(private val context: Context) {
                     }
 
                     var message =
-                        parsed && typeof parsed.error === 'string' && parsed.error.length > 0
-                            ? parsed.error
-                            : 'bridge call failed';
+                        parsed && typeof parsed.message === 'string' && parsed.message.length > 0
+                            ? parsed.message
+                            : '';
                     return invoke($safeCallbackId, '', [message, null]);
                 })();
             """.trimIndent()
@@ -2526,7 +1941,7 @@ class JsEngine(private val context: Context) {
             val activity = ActivityLifecycleManager.getCurrentActivity()
                 ?: return JSONObject()
                     .put("success", false)
-                    .put("error", "current activity is null")
+                    .put("message", "current activity is null")
                     .toString()
             return exposeJavaObject(
                 target = activity,
@@ -2756,9 +2171,13 @@ class JsEngine(private val context: Context) {
             try {
                 val session = resolveExecutionSession(callId) ?: return
                 session.executionListener?.onIntermediateResult(callId, result)
-                ContextCompat.getMainExecutor(context).execute {
-                    session.intermediateResultCallback?.invoke(result)
+                if (session.dispatchIntermediateOnMain) {
+                    ContextCompat.getMainExecutor(context).execute {
+                        session.intermediateResultCallback?.invoke(result)
+                    }
+                    return
                 }
+                session.intermediateResultCallback?.invoke(result)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Error processing call intermediate result: callId=$callId, reason=${e.message}", e)
             }
@@ -2831,7 +2250,6 @@ class JsEngine(private val context: Context) {
         /** 向JavaScript发送工具调用结果 */
         private fun sendToolResult(callbackId: String, result: String, isError: Boolean) {
             if (!canScheduleQuickJsWork()) {
-                AppLogger.d(TAG, "Drop tool result after JsEngine destroyed: callbackId=$callbackId")
                 return
             }
             try {
@@ -2850,6 +2268,30 @@ class JsEngine(private val context: Context) {
                 )
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Error sending tool result to JavaScript: ${e.message}", e)
+            }
+        }
+
+        /** ToolPkg.ipc uses a JSON string envelope, so its callback must receive a string. */
+        private fun sendToolPkgIpcResult(callbackId: String, result: String, isError: Boolean) {
+            if (!canScheduleQuickJsWork()) {
+                return
+            }
+            try {
+                ensureQuickJs()
+                val jsCode =
+                    JsNativeInterfaceDelegates.buildStringResultCallbackScript(
+                        callbackId = callbackId,
+                        result = result,
+                        isError = isError
+                    )
+                launchQuickJsEvaluation(
+                    script = jsCode,
+                    onError = { e ->
+                        AppLogger.e(TAG, "Error sending ToolPkg.ipc result to JavaScript: ${e.message}", e)
+                    }
+                )
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error sending ToolPkg.ipc result to JavaScript: ${e.message}", e)
             }
         }
 
@@ -2897,11 +2339,11 @@ class JsEngine(private val context: Context) {
                 val logMessage = extractErrorLogMessage(error)
                 val enrichedLogMessage = withToolPkgCodeContext(session, logMessage)
                 AppLogger.e(TOOLPKG_TAG, withToolPkgPluginTag(session, "JS ERROR: $enrichedLogMessage"))
-                session.executionListener?.onFailed(callId, error)
+                session.executionListener?.onFailed(callId, logMessage)
 
                 completeCallFuture(
                     session = session,
-                    value = "Error: ${withToolPkgCodeContext(session, error)}",
+                    value = error,
                     failureMessage = "Error completing error callback"
                 )
             } catch (e: Exception) {
@@ -2937,26 +2379,12 @@ class JsEngine(private val context: Context) {
                     if (errorJson.has("formatted")) {
                         return errorJson.getString("formatted")
                     }
-                    if (errorJson.has("error") && errorJson.has("message")) {
-                        val errorType = errorJson.getString("error")
-                        val errorMsg = errorJson.getString("message")
-                        var message = "$errorType: $errorMsg"
-                        if (errorJson.has("details")) {
-                            val details = errorJson.getJSONObject("details")
-                            if (details.has("fileName") && details.has("lineNumber")) {
-                                message +=
-                                    "\nAt ${details.getString("fileName")}:${details.getString("lineNumber")}"
-                            }
-                            if (details.has("stack")) {
-                                message += "\nStack: ${details.getString("stack")}"
-                            }
-                        }
-                        return message
+                    if (errorJson.has("message")) {
+                        return errorJson.getString("message")
                     }
                 }
                 error
             } catch (e: Exception) {
-                AppLogger.d(TAG, "Error parsing error message as JSON: ${e.message}")
                 error
             }
         }
@@ -2987,7 +2415,6 @@ class JsEngine(private val context: Context) {
 
         @JavascriptInterface
         fun logDebug(message: String, data: String) {
-            AppLogger.d(TOOLPKG_TAG, withToolPkgPluginTag("$message | $data"))
         }
 
         @JavascriptInterface

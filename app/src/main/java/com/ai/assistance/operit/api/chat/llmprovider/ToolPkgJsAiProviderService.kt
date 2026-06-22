@@ -64,6 +64,9 @@ internal class ToolPkgJsAiProviderService(
     private val executionChatId =
         "toolpkg-ai-provider:${provider.providerId}:${UUID.randomUUID().toString().replace("-", "")}"
 
+    private val providerRuntimeContextKey =
+        "toolpkg_provider:${provider.containerPackageName}:${provider.providerId.trim().lowercase()}"
+
     override val inputTokenCount: Int
         get() = currentInputTokenCount
 
@@ -221,13 +224,15 @@ internal class ToolPkgJsAiProviderService(
             if (onIntermediateResult == null) {
                 null
             } else {
-                Channel<ProviderHookValue>(capacity = Channel.UNLIMITED)
+                Channel<Any?>(capacity = Channel.UNLIMITED)
             }
         val intermediateJob =
             intermediateChannel?.let { channel ->
                 launch(Dispatchers.IO) {
-                    for (value in channel) {
-                        onIntermediateResult?.invoke(value)
+                    for (raw in channel) {
+                        onIntermediateResult?.invoke(
+                            decodeProviderHookValue(decodeToolPkgHookResult(raw))
+                        )
                     }
                 }
             }
@@ -245,12 +250,13 @@ internal class ToolPkgJsAiProviderService(
                             jsonObjectToMap(
                                 JSONObject(eventPayload.toString()).put("chatId", executionChatId)
                             ),
+                        executionContextKey = providerRuntimeContextKey,
+                        runtimeKind = "provider",
+                        dispatchIntermediateOnMain = false,
                         onIntermediateResult =
                             intermediateChannel?.let { channel ->
                                 { raw ->
-                                    channel.trySend(
-                                        decodeProviderHookValue(decodeToolPkgHookResult(raw))
-                                    )
+                                    channel.trySend(raw)
                                 }
                             }
                     )
@@ -288,6 +294,7 @@ internal class ToolPkgJsAiProviderService(
             "enableDirectAudioProcessing" to config.enableDirectAudioProcessing,
             "enableDirectVideoProcessing" to config.enableDirectVideoProcessing,
             "enableGoogleSearch" to config.enableGoogleSearch,
+            "enableClaude1hPromptCache" to config.enableClaude1hPromptCache,
             "enableToolCall" to config.enableToolCall,
             "requestLimitPerMinute" to config.requestLimitPerMinute,
             "maxConcurrentRequests" to config.maxConcurrentRequests,

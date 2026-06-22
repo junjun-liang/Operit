@@ -24,7 +24,7 @@ export function registerToolPkg(): boolean {
       zh: "OpenCode",
       en: "OpenCode",
     },
-    icon: "Code",
+    icon: Icons.Code,
     order: 130,
   });
 

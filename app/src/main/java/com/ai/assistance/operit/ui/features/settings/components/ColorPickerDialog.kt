@@ -254,7 +254,12 @@ fun ColorPickerDialog(
             )
         },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // Live color preview - use solid backgrounds
                 Box(
                     modifier = Modifier.fillMaxWidth()

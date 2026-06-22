@@ -63,6 +63,7 @@ import com.ai.assistance.operit.ui.common.animations.SimpleAnimatedVisibility
 import com.ai.assistance.operit.ui.features.chat.components.AttachmentChip
 import com.ai.assistance.operit.ui.features.chat.components.AttachmentSelectorPanel
 import com.ai.assistance.operit.ui.features.chat.components.FullscreenInputDialog
+import com.ai.assistance.operit.ui.features.chat.components.style.input.common.rememberMentionVisualTransformation
 import com.ai.assistance.operit.ui.features.chat.components.SimpleLinearProgressIndicator
 import com.ai.assistance.operit.ui.features.chat.components.style.input.common.PendingMessageQueuePanel
 import com.ai.assistance.operit.ui.features.chat.components.style.input.common.PendingQueueMessageItem
@@ -96,6 +97,7 @@ fun ClassicChatInputSection(
     onAttachNotifications: () -> Unit = {},
     onAttachLocation: () -> Unit = {},
     onAttachMemory: () -> Unit = {},
+    onAttachPackage: (String) -> Unit = {},
     onTakePhoto: (Uri) -> Unit,
     hasBackgroundImage: Boolean = false,
     chatInputTransparent: Boolean = false,
@@ -157,6 +159,7 @@ fun ClassicChatInputSection(
         )
     }
     val modernTextStyle = TextStyle(fontSize = 13.sp, lineHeight = 16.sp)
+    val mentionVisualTransformation = rememberMentionVisualTransformation(modernTextStyle)
     val colorScheme = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
 
@@ -444,13 +447,16 @@ fun ClassicChatInputSection(
             if (attachments.isNotEmpty()) {
                 LazyRow(
                     modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = 16.dp,
-                            vertical = 4.dp
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 0.dp,
+                                bottom = 6.dp
+                            ),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Bottom
                 ) {
                     items(attachments) { attachment ->
                         AttachmentChip(
@@ -513,6 +519,7 @@ fun ClassicChatInputSection(
                         },
                     textStyle = modernTextStyle.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    visualTransformation = mentionVisualTransformation,
                     maxLines = 5,
                     minLines = 1,
                     keyboardOptions =
@@ -750,6 +757,7 @@ fun ClassicChatInputSection(
                 onAttachNotifications = onAttachNotifications,
                 onAttachLocation = onAttachLocation,
                 onAttachMemory = onAttachMemory,
+                onAttachPackage = onAttachPackage,
                 onTakePhoto = onTakePhoto,
                 userQuery = userMessage.text,
                 onDismiss = { setShowAttachmentPanel(false) }

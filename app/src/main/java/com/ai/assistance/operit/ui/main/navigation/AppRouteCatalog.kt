@@ -3,11 +3,11 @@ package com.ai.assistance.operit.ui.main.navigation
 import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.ui.graphics.vector.ImageVector
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.core.tools.packTool.TOOLPKG_NAV_SURFACE_MAIN_SIDEBAR_PLUGINS
 import com.ai.assistance.operit.core.tools.packTool.TOOLPKG_NAV_SURFACE_TOOLBOX
+import com.ai.assistance.operit.ui.common.icons.MaterialIconNameResolver
 import com.ai.assistance.operit.ui.main.screens.Screen
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 import com.ai.assistance.operit.ui.common.NavItem
@@ -43,7 +43,7 @@ object AppRouteCatalog {
                     surface = surface,
                     title = entry.title,
                     description = entry.description,
-                    icon = resolveIcon(entry.icon),
+                    icon = MaterialIconNameResolver.resolveOrDefault(entry.icon, Icons.Default.Extension),
                     order = entry.order,
                     action =
                         entry.action?.let { action ->
@@ -97,27 +97,5 @@ object AppRouteCatalog {
         source: RouteEntrySource = RouteEntrySource.DEFAULT
     ): RouteEntry {
         return ScreenRouteRegistry.toEntry(screen = screen, source = source)
-    }
-
-    private fun resolveIcon(iconName: String?): ImageVector {
-        val rawName = iconName?.trim().orEmpty()
-        if (rawName.isEmpty()) {
-            return Icons.Default.Extension
-        }
-        val pascalCaseName =
-            rawName
-                .split(Regex("[^A-Za-z0-9]+"))
-                .filter { it.isNotBlank() }
-                .joinToString(separator = "") { segment ->
-                    segment.replaceFirstChar { char -> char.uppercaseChar() }
-                }
-                .ifBlank { rawName.replaceFirstChar { char -> char.uppercaseChar() } }
-        return try {
-            val iconKtClass = Class.forName("androidx.compose.material.icons.filled.${pascalCaseName}Kt")
-            val getterMethod = iconKtClass.getMethod("get$pascalCaseName", Icons.Default::class.java)
-            getterMethod.invoke(null, Icons.Default) as? ImageVector ?: Icons.Default.Extension
-        } catch (_error: Throwable) {
-            Icons.Default.Extension
-        }
     }
 }

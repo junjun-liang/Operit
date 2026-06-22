@@ -39,6 +39,9 @@ internal class WebChatManagementBridge(
         if (request.updateLocked && request.locked != null) {
             chatHistoryManager.updateChatLocked(chatId, request.locked)
         }
+        if (request.updatePinned && request.pinned != null) {
+            chatHistoryManager.updateChatPinned(chatId, request.pinned)
+        }
         if (request.updateBinding) {
             chatHistoryManager.updateChatCharacterBinding(
                 chatId = chatId,

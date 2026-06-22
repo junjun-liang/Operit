@@ -5,12 +5,17 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.ai.assistance.operit.R
+import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.OperitPaths
 import com.ai.assistance.operit.core.tools.AIToolHandler
+import com.ai.assistance.operit.core.tools.DirectoryListingData
+import com.ai.assistance.operit.core.tools.FileContentData
+import com.ai.assistance.operit.core.tools.FileExistsData
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.AttachmentInfo
 import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.data.skill.SkillRepository
 import com.ai.assistance.operit.util.OCRUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -18,7 +23,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import java.io.File
 import java.text.SimpleDateFormat
@@ -33,6 +37,8 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
     companion object {
         private const val TAG = "AttachmentDelegate"
         private const val OCR_INLINE_INSTRUCTION = "Do not read the file, answer the user\'s question directly based on the attachment content and the user\'s question."
+        private const val PACKAGE_ATTACHMENT_PREFIX = "package_attach:"
+        private const val WORKSPACE_MENTION_ATTACHMENT_PREFIX = "workspace_mention:"
     }
 
     // State for attachments
@@ -115,21 +121,28 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
                 }
             }
 
+    suspend fun attachPackage(packageName: String) =
+            withContext(Dispatchers.IO) { attachPackageInternal(packageName) }
+
     /** Handles a file or image attachment selected by the user 确保在IO线程执行所有文件操作 */
     suspend fun handleAttachment(filePath: String) =
             withContext(Dispatchers.IO) {
                 try {
-                    when (filePath) {
-                        "screen_capture" -> {
+                    when {
+                        filePath == "screen_capture" -> {
                             captureScreenContent()
                             return@withContext
                         }
-                        "notifications_capture" -> {
+                        filePath == "notifications_capture" -> {
                             captureNotifications()
                             return@withContext
                         }
-                        "location_capture" -> {
+                        filePath == "location_capture" -> {
                             captureLocation()
+                            return@withContext
+                        }
+                        filePath.startsWith(PACKAGE_ATTACHMENT_PREFIX) -> {
+                            attachPackageInternal(filePath.removePrefix(PACKAGE_ATTACHMENT_PREFIX).trim())
                             return@withContext
                         }
                     }
@@ -138,40 +151,21 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
                     var fileName: String? = null
                     var mimeType: String? = null
 
-                    // 检查是否是媒体选择器特殊路径
-                    if (filePath.contains("/sdcard/.transforms/synthetic/picker/") ||
-                                    filePath.contains("/com.android.providers.media.photopicker/")
-                    ) {
-                        AppLogger.d(TAG, "Detected media picker special path: $filePath")
-
-                        try {
-                            // 尝试从特殊路径提取实际URI
-                            val actualUri = extractMediaStoreUri(filePath)
-                            if (actualUri != null) {
-                                sourceUri = actualUri
-                                fileName = filePath.substringAfterLast('/')
-                                mimeType =
-                                        context.contentResolver.getType(actualUri)
-                                                ?: getMimeTypeFromPath(fileName!!)
-                                                ?: "image/jpeg"
-                            }
-                        } catch (e: Exception) {
-                            AppLogger.e(TAG, "Error handling media picker path", e)
-                            // 继续尝试常规处理方法
-                        }
-                    }
-
-                    if (sourceUri == null && filePath.startsWith("content://")) {
+                    if (filePath.startsWith("content://")) {
                         val uri = Uri.parse(filePath)
                         AppLogger.d(TAG, "Handling content URI: $uri")
 
                         sourceUri = uri
                         fileName = getFileNameFromUri(uri)
                         mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                    } else if (sourceUri == null) {
-                        // Handle as regular file path, but copy immediately because some picker
-                        // providers expose unstable paths such as /storage/.pick/...
-                        val file = java.io.File(filePath)
+                    } else {
+                        val localPath = if (filePath.startsWith("file://")) Uri.parse(filePath).path else filePath
+                        if (localPath.isNullOrBlank()) {
+                            _toastEvent.emit(context.getString(R.string.attachment_cannot_attach, filePath))
+                            return@withContext
+                        }
+
+                        val file = java.io.File(localPath)
                         if (!file.exists()) {
                             _toastEvent.emit(context.getString(R.string.attachment_file_not_exist))
                             return@withContext
@@ -179,7 +173,7 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
 
                         sourceUri = Uri.fromFile(file)
                         fileName = file.name
-                        mimeType = getMimeTypeFromPath(filePath) ?: "application/octet-stream"
+                        mimeType = getMimeTypeFromPath(localPath) ?: "application/octet-stream"
                     }
 
                     val resolvedUri = sourceUri
@@ -217,30 +211,6 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
                     AppLogger.e(TAG, "Error adding attachment", e)
                 }
             }
-
-    /** 从媒体选择器路径提取真实的MediaStore URI */
-    private fun extractMediaStoreUri(filePath: String): Uri? {
-        try {
-            // 从文件名中提取媒体ID
-            val mediaId = filePath.substringAfterLast('/').substringBefore('.')
-            if (mediaId.toLongOrNull() != null) {
-                // 构造MediaStore URI
-                return Uri.parse("content://media/external/images/media/$mediaId")
-            }
-
-            // 尝试通过直接构造content URI
-            if (filePath.contains("com.android.providers.media.photopicker")) {
-                val path = "content://com.android.providers.media.photopicker/media/$mediaId"
-                return Uri.parse(path)
-            }
-
-            // 最后尝试直接将路径转为URI
-            return Uri.parse("file://$filePath")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to extract media URI: $filePath", e)
-            return null
-        }
-    }
 
     /** 从URI创建临时文件 */
     private suspend fun createTempFileFromUri(uri: Uri, fileName: String): java.io.File? =
@@ -283,6 +253,251 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
                     return@withContext null
                 }
             }
+
+    private suspend fun attachPackageInternal(packageName: String) {
+        if (packageName.isBlank()) {
+            _toastEvent.emit(context.getString(R.string.attachment_package_failed, packageName))
+            return
+        }
+
+        val packageManager = PackageManager.getInstance(context, toolHandler)
+        val isStandardPackage =
+            packageManager.getAvailablePackages().containsKey(packageName) &&
+                !packageManager.isToolPkgContainer(packageName)
+        val isSkillPackage =
+            SkillRepository.getInstance(context.applicationContext).getAiVisibleSkillPackages().containsKey(packageName)
+        val isMcpPackage = packageManager.getAvailableServerPackages().containsKey(packageName)
+
+        if (!isStandardPackage && !isSkillPackage && !isMcpPackage) {
+            _toastEvent.emit(context.getString(R.string.attachment_package_failed, packageName))
+            return
+        }
+
+        if (isStandardPackage) {
+            packageManager.enablePackage(packageName)
+        }
+
+        val packageContent = packageManager.usePackage(packageName)
+        if (isPackageAttachmentError(packageName, packageContent)) {
+            AppLogger.w(TAG, "添加包附件失败: $packageName, reason=$packageContent")
+            _toastEvent.emit(context.getString(R.string.attachment_package_failed, packageName))
+            return
+        }
+
+        val attachmentInfo =
+            AttachmentInfo(
+                filePath = packageAttachmentPath(packageName),
+                fileName = packageAttachmentDisplayName(packageName),
+                mimeType = "text/plain",
+                fileSize = packageContent.length.toLong(),
+                content = packageContent
+            )
+        _attachments.value =
+            _attachments.value.filterNot { it.filePath == attachmentInfo.filePath } + attachmentInfo
+        _toastEvent.emit(context.getString(R.string.attachment_package_added, packageName))
+    }
+
+    fun removePackageAttachment(packageName: String) {
+        val normalizedPackageName = packageName.trim()
+        if (normalizedPackageName.isEmpty()) return
+
+        removeAttachment(packageAttachmentPath(normalizedPackageName))
+    }
+
+    suspend fun attachWorkspaceMention(
+        workspacePath: String,
+        relativePath: String,
+        workspaceEnv: String? = null,
+    ) = withContext(Dispatchers.IO) {
+        val normalizedRelativePath = normalizeWorkspaceRelativePath(relativePath)
+        if (workspacePath.isBlank() || normalizedRelativePath.isBlank()) {
+            return@withContext
+        }
+
+        val fullPath = buildWorkspaceChildPath(workspacePath, normalizedRelativePath)
+        val existsData = readWorkspaceEntryMetadata(fullPath, workspaceEnv)
+        if (existsData == null || !existsData.exists) {
+            _toastEvent.emit(context.getString(R.string.attachment_file_not_exist))
+            return@withContext
+        }
+
+        val content =
+            if (existsData.isDirectory) {
+                buildWorkspaceDirectoryMentionContent(
+                    fullPath = fullPath,
+                    relativePath = normalizedRelativePath,
+                    workspaceEnv = workspaceEnv,
+                )
+            } else {
+                buildWorkspaceFileMentionContent(
+                    fullPath = fullPath,
+                    relativePath = normalizedRelativePath,
+                    workspaceEnv = workspaceEnv,
+                )
+            }
+
+        val attachmentInfo =
+            AttachmentInfo(
+                filePath = workspaceMentionAttachmentPath(normalizedRelativePath),
+                fileName = normalizedRelativePath,
+                mimeType =
+                    if (existsData.isDirectory) {
+                        "application/vnd.workspace-directory+plain"
+                    } else {
+                        "text/plain"
+                    },
+                fileSize = content.length.toLong(),
+                content = content,
+            )
+
+        _attachments.value =
+            _attachments.value.filterNot { it.filePath == attachmentInfo.filePath } + attachmentInfo
+    }
+
+    fun removeWorkspaceMentionAttachment(relativePath: String) {
+        val normalizedRelativePath = normalizeWorkspaceRelativePath(relativePath)
+        if (normalizedRelativePath.isEmpty()) return
+        removeAttachment(workspaceMentionAttachmentPath(normalizedRelativePath))
+    }
+
+    private fun packageAttachmentPath(packageName: String): String {
+        return "$PACKAGE_ATTACHMENT_PREFIX$packageName"
+    }
+
+    private fun packageAttachmentDisplayName(packageName: String): String {
+        return "包: $packageName"
+    }
+
+    private fun workspaceMentionAttachmentPath(relativePath: String): String {
+        return "$WORKSPACE_MENTION_ATTACHMENT_PREFIX$relativePath"
+    }
+
+    private fun normalizeWorkspaceRelativePath(relativePath: String): String {
+        return relativePath.trim().replace('\\', '/').trim('/')
+    }
+
+    private fun buildWorkspaceChildPath(workspacePath: String, relativePath: String): String {
+        val normalizedRoot = workspacePath.trimEnd('/', '\\')
+        val normalizedChild = relativePath.trimStart('/', '\\')
+        return if (normalizedRoot.isEmpty()) {
+            normalizedChild
+        } else {
+            "$normalizedRoot/$normalizedChild"
+        }
+    }
+
+    private suspend fun readWorkspaceEntryMetadata(
+        fullPath: String,
+        workspaceEnv: String?,
+    ): FileExistsData? {
+        return if (workspaceEnv.isNullOrBlank()) {
+            val file = File(fullPath)
+            FileExistsData(
+                path = fullPath,
+                exists = file.exists(),
+                isDirectory = file.isDirectory,
+                size = if (file.exists() && !file.isDirectory) file.length() else 0L,
+            )
+        } else {
+            val result =
+                toolHandler.executeTool(
+                    AITool(
+                        name = "file_exists",
+                        parameters = listOf(
+                            ToolParameter("path", fullPath),
+                            ToolParameter("environment", workspaceEnv),
+                        ),
+                    ),
+                )
+            result.result as? FileExistsData
+        }
+    }
+
+    private suspend fun buildWorkspaceFileMentionContent(
+        fullPath: String,
+        relativePath: String,
+        workspaceEnv: String?,
+    ): String {
+        val parameters =
+            buildList {
+                add(ToolParameter("path", fullPath))
+                add(ToolParameter("text_only", "true"))
+                if (!workspaceEnv.isNullOrBlank()) {
+                    add(ToolParameter("environment", workspaceEnv))
+                }
+            }
+        val result =
+            toolHandler.executeTool(
+                AITool(
+                    name = "read_file_full",
+                    parameters = parameters,
+                ),
+            )
+        val content = (result.result as? FileContentData)?.content.orEmpty()
+        return buildString {
+            appendLine("Selected workspace file: $relativePath")
+            appendLine("This file was referenced via @ mention.")
+            appendLine()
+            appendLine("File content:")
+            append(content)
+        }
+    }
+
+    private suspend fun buildWorkspaceDirectoryMentionContent(
+        fullPath: String,
+        relativePath: String,
+        workspaceEnv: String?,
+    ): String {
+        val parameters =
+            buildList {
+                add(ToolParameter("path", fullPath))
+                if (!workspaceEnv.isNullOrBlank()) {
+                    add(ToolParameter("environment", workspaceEnv))
+                }
+            }
+        val result =
+            toolHandler.executeTool(
+                AITool(
+                    name = "list_files",
+                    parameters = parameters,
+                ),
+            )
+        val listing = result.result as? DirectoryListingData
+        return buildString {
+            appendLine("Selected workspace directory: $relativePath")
+            appendLine("This directory was referenced via @ mention.")
+            appendLine()
+            appendLine("Directory entries:")
+            if (listing == null || listing.entries.isEmpty()) {
+                appendLine("(empty)")
+            } else {
+                listing.entries
+                    .sortedWith(
+                        compareBy<DirectoryListingData.FileEntry> { !it.isDirectory }
+                            .thenBy { it.name.lowercase() },
+                    )
+                    .forEach { entry ->
+                        val kind = if (entry.isDirectory) "[DIR]" else "[FILE]"
+                        appendLine("$kind ${entry.name}")
+                    }
+            }
+        }
+    }
+
+    private fun isPackageAttachmentError(packageName: String, packageContent: String): Boolean {
+        if (packageContent.isBlank()) {
+            return true
+        }
+        return packageContent.startsWith("Package not found: ") ||
+            packageContent.startsWith("Failed to load package data for: ") ||
+            packageContent.startsWith("Missing required environment variables for package ") ||
+            packageContent.startsWith("ToolPkg container '") ||
+            packageContent.contains(" is inactive.") ||
+            packageContent.startsWith("MCP server '") ||
+            packageContent.startsWith("Cannot connect to MCP server") ||
+            packageContent.startsWith("Cannot get MCP server configuration") ||
+            packageContent == "Skill '$packageName' is set to not show to AI"
+    }
 
     /** Removes an attachment by its file path */
     fun removeAttachment(filePath: String) {
@@ -563,96 +778,6 @@ $foldersText
 </memory_context>""".trimIndent()
     }
 
-    /** 从Content URI获取文件的实际路径，不复制文件内容 */
-    private fun getFilePathFromUri(uri: Uri): String? {
-        try {
-            // 尝试直接从URI获取路径
-            if (uri.scheme == "file") {
-                return uri.path
-            }
-
-            // 对于content URI，使用不同的方法尝试获取实际路径
-            if (uri.scheme == "content") {
-                // 特殊处理: Downloads提供程序URI
-                if (uri.authority == "com.android.providers.downloads.documents") {
-                    val id = android.provider.DocumentsContract.getDocumentId(uri)
-
-                    // 处理raw:前缀，直接解码路径
-                    if (id.startsWith("raw:")) {
-                        val decodedPath = java.net.URLDecoder.decode(id.substring(4), "UTF-8")
-                        AppLogger.d(TAG, "Downloads document URI resolved to: $decodedPath")
-                        return decodedPath
-                    }
-
-                    // 处理msf:前缀
-                    else if (id.startsWith("msf:")) {
-                        // MediaStore format.
-                        val mediaId = id.substring(4)
-                        // We can't know from the URI alone if it's an image, video, or audio file.
-                        // So we'll use the generic files table.
-                        val contentUri = android.provider.MediaStore.Files.getContentUri("external")
-                        val selection = "_id=?"
-                        val selectionArgs = arrayOf(mediaId)
-                        return getDataColumn(contentUri, selection, selectionArgs)
-                    }
-
-                    // 普通ID，使用下载内容URI
-                    else {
-                        val contentUri = android.content.ContentUris.withAppendedId(
-                            Uri.parse("content://downloads/public_downloads"),
-                            id.toLong()
-                        )
-                        return getDataColumn(contentUri, null, null)
-                    }
-                }
-
-                // 方法1: 通过DocumentsContract获取路径 (API 19+)
-                try {
-                    val docId = android.provider.DocumentsContract.getDocumentId(uri)
-                    val split = docId.split(":")
-                    val type = split[0]
-
-                    // 对于外部存储文件
-                    if ("primary".equals(type, ignoreCase = true)) {
-                        return "/sdcard/${split[1]}"
-                    }
-
-                    // 对于SD卡
-                    if ("sdcard".equals(type, ignoreCase = true) && split.size > 1) {
-                        return "/storage/sdcard1/${split[1]}"
-                    }
-                } catch (e: Exception) {
-                    AppLogger.d(TAG, "Failed to get path through DocumentsContract", e)
-                }
-
-                // 方法2: 通过MediaStore查询
-                return getDataColumn(uri, null, null)
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to get actual file path: ${e.message}", e)
-        }
-
-        return null
-    }
-
-    /** 从URI获取数据列(DATA)的值 */
-    private fun getDataColumn(uri: Uri, selection: String?, selectionArgs: Array<String>?): String? {
-        val projection = arrayOf(android.provider.MediaStore.MediaColumns.DATA)
-
-        try {
-            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val columnIndex = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.DATA)
-                    return cursor.getString(columnIndex)
-                }
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to query URI data column: ${e.message}", e)
-        }
-
-        return null
-    }
-
     /** Get file name from content URI */
     private suspend fun getFileNameFromUri(uri: Uri): String =
             withContext(Dispatchers.IO) {
@@ -674,28 +799,6 @@ $foldersText
                 }
 
                 return@withContext fileName
-            }
-
-    /** Get file size from content URI */
-    private suspend fun getFileSizeFromUri(uri: Uri): Long =
-            withContext(Dispatchers.IO) {
-                val contentResolver = context.contentResolver
-                var fileSize = 0L
-
-                try {
-                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                            if (sizeIndex != -1) {
-                                fileSize = cursor.getLong(sizeIndex)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    AppLogger.e(TAG, "Error getting file size from URI", e)
-                }
-
-                return@withContext fileSize
             }
 
     /** Get MIME type from file path */

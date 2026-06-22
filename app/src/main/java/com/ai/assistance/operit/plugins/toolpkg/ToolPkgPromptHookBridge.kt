@@ -45,8 +45,8 @@ internal object ToolPkgPromptHookBridge {
     @Volatile
     private var promptEstimateFinalizeHooks: List<ToolPkgPromptHookRegistration> = emptyList()
     private val runtimeChangeListener =
-        PackageManager.ToolPkgRuntimeChangeListener {
-            syncToolPkgRegistrations(toolPkgPackageManager().getEnabledToolPkgContainerRuntimes())
+        PackageManager.ToolPkgRuntimeChangeListener { activeContainers ->
+            syncToolPkgRegistrations(activeContainers)
         }
 
     private object PromptInputBridge : PromptInputHook {
@@ -212,6 +212,7 @@ internal object ToolPkgPromptHookBridge {
             preparedHistory = current.preparedHistory,
             systemPrompt = current.systemPrompt,
             toolPrompt = current.toolPrompt,
+            availableTools = current.availableTools,
             metadata = current.metadata
         )
     }
@@ -376,6 +377,7 @@ internal object ToolPkgPromptHookBridge {
             preparedHistory = mutation.preparedHistory ?: context.preparedHistory,
             systemPrompt = mutation.systemPrompt ?: context.systemPrompt,
             toolPrompt = mutation.toolPrompt ?: context.toolPrompt,
+            availableTools = mutation.availableTools ?: context.availableTools,
             metadata = if (mutation.metadata.isEmpty()) context.metadata else context.metadata + mutation.metadata
         )
     }
@@ -460,8 +462,21 @@ internal object ToolPkgPromptHookBridge {
             preparedHistory = parsePromptTurns(jsonObject.optJSONArray("preparedHistory")),
             systemPrompt = jsonObject.optString("systemPrompt").takeIf { it.isNotBlank() },
             toolPrompt = jsonObject.optString("toolPrompt").takeIf { it.isNotBlank() },
+            availableTools = parsePromptToolItems(jsonObject.optJSONArray("availableTools")),
             metadata = metadata
         )
+    }
+
+    private fun parsePromptToolItems(jsonArray: JSONArray?): List<Map<String, Any?>>? {
+        if (jsonArray == null) {
+            return null
+        }
+        val result = mutableListOf<Map<String, Any?>>()
+        for (index in 0 until jsonArray.length()) {
+            val item = jsonArray.opt(index) as? JSONObject ?: continue
+            result.add(jsonObjectToMap(item))
+        }
+        return result
     }
 
     private fun parsePromptTurns(jsonArray: JSONArray?): List<PromptTurn>? {

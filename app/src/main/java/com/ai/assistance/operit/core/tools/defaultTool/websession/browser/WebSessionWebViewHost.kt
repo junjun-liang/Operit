@@ -24,6 +24,8 @@ internal class WebSessionWebViewHost {
         reattach()
     }
 
+    fun currentWebView(): WebView? = activeWebView
+
     fun clear() {
         container?.removeAllViews()
         container = null

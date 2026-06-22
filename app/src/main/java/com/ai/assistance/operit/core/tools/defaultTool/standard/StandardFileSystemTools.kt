@@ -46,6 +46,7 @@ import com.ai.assistance.operit.util.MediaPoolManager
 import com.ai.assistance.operit.util.HttpMultiPartDownloader
 import com.ai.assistance.operit.util.FFmpegUtil
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -53,12 +54,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.core.content.FileProvider
@@ -89,6 +92,8 @@ open class StandardFileSystemTools(protected val context: Context) {
         protected const val TAG = "FileSystemTools"
         private const val RIPGREP_EXECUTOR_POOL_SIZE = 4
         private const val RIPGREP_COMMAND_TIMEOUT_MS = 10_000L
+        private const val RIPGREP_PARSE_TIMEOUT_MS = 5_000L
+        private const val RIPGREP_PARSE_YIELD_EVERY_LINES = 256
         private val ripgrepInstallMutex = Mutex()
         @Volatile
         private var ripgrepAvailabilityVerified = false
@@ -297,12 +302,20 @@ open class StandardFileSystemTools(protected val context: Context) {
         return "rg $quotedArgs"
     }
 
+    private fun addWorkspaceSearchExcludes(args: MutableList<String>) {
+        listOf("!.backup/**", "!.operit/**", "!backup/**").forEach { glob ->
+            args.add("-g")
+            args.add(glob)
+        }
+    }
+
     private fun buildRipgrepCodeCommand(
         path: String,
         pattern: String,
         filePattern: String,
         caseInsensitive: Boolean,
-        contextLines: Int
+        contextLines: Int,
+        maxResults: Int? = null
     ): String {
         val args = mutableListOf(
             "--json",
@@ -314,12 +327,18 @@ open class StandardFileSystemTools(protected val context: Context) {
             "-C",
             contextLines.coerceAtLeast(0).toString()
         )
+        addWorkspaceSearchExcludes(args)
         if (caseInsensitive) {
             args.add("-i")
         }
         if (filePattern.isNotBlank() && filePattern != "*") {
             args.add("-g")
             args.add(filePattern)
+        }
+        val effectiveMaxResults = maxResults?.coerceAtLeast(0)
+        if (effectiveMaxResults != null && effectiveMaxResults > 0) {
+            args.add("--max-count")
+            args.add(effectiveMaxResults.toString())
         }
         args.add("--")
         args.add(pattern)
@@ -345,6 +364,7 @@ open class StandardFileSystemTools(protected val context: Context) {
             "-C",
             contextLines.coerceAtLeast(0).toString()
         )
+        addWorkspaceSearchExcludes(args)
         if (filePattern.isNotBlank() && filePattern != "*") {
             args.add("-g")
             args.add(filePattern)
@@ -396,37 +416,54 @@ open class StandardFileSystemTools(protected val context: Context) {
         )
     }
 
-    private fun parseRipgrepBlocks(output: String): Pair<List<RipgrepBlock>, Int> {
+    private suspend fun parseRipgrepBlocks(
+        output: String,
+        maxBlocks: Int? = null
+    ): Pair<List<RipgrepBlock>, Int> {
         val blocks = mutableListOf<RipgrepBlock>()
         val currentBlocks = LinkedHashMap<String, MutableList<RipgrepBlockLine>>()
         val seenFiles = LinkedHashSet<String>()
         var summarySearches: Int? = null
+        val effectiveMaxBlocks = maxBlocks?.coerceAtLeast(0)
+        var lineCount = 0
 
         fun flushBlock(filePath: String) {
+            if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                currentBlocks.remove(filePath)
+                return
+            }
             val current = currentBlocks.remove(filePath) ?: return
             finalizeRipgrepBlock(filePath, current)?.let { blocks.add(it) }
         }
 
-        output.lineSequence().forEach { rawLine ->
-            val trimmed = rawLine.trim()
-            if (!trimmed.startsWith("{")) return@forEach
+        parseLoop@ for (rawLine in output.lineSequence()) {
+            lineCount++
+            if (lineCount % RIPGREP_PARSE_YIELD_EVERY_LINES == 0) {
+                yield()
+            }
 
-            val json = runCatching { JSONObject(trimmed) }.getOrNull() ?: return@forEach
+            val trimmed = rawLine.trim()
+            if (!trimmed.startsWith("{")) continue
+            if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                break
+            }
+
+            val json = runCatching { JSONObject(trimmed) }.getOrNull() ?: continue
             when (json.optString("type")) {
                 "begin" -> {
-                    val data = json.optJSONObject("data") ?: return@forEach
+                    val data = json.optJSONObject("data") ?: continue@parseLoop
                     extractRipgrepPath(data)?.let { seenFiles.add(it) }
                 }
                 "match", "context" -> {
-                    val data = json.optJSONObject("data") ?: return@forEach
-                    val filePath = extractRipgrepPath(data) ?: return@forEach
+                    val data = json.optJSONObject("data") ?: continue@parseLoop
+                    val filePath = extractRipgrepPath(data) ?: continue@parseLoop
                     val lineNumber = data.optInt("line_number", -1)
-                    if (lineNumber < 1) return@forEach
+                    if (lineNumber < 1) continue@parseLoop
                     val text =
                         data.optJSONObject("lines")
                             ?.optString("text")
                             ?.trimEnd('\n', '\r')
-                            ?: return@forEach
+                            ?: continue@parseLoop
 
                     seenFiles.add(filePath)
                     val current = currentBlocks[filePath]
@@ -442,6 +479,9 @@ open class StandardFileSystemTools(protected val context: Context) {
                         val previousLine = current.lastOrNull()?.lineNumber ?: -1
                         if (previousLine >= 0 && lineNumber > previousLine + 1) {
                             flushBlock(filePath)
+                            if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                                break@parseLoop
+                            }
                             currentBlocks[filePath] = mutableListOf(
                                 RipgrepBlockLine(
                                     lineNumber = lineNumber,
@@ -461,10 +501,13 @@ open class StandardFileSystemTools(protected val context: Context) {
                     }
                 }
                 "end" -> {
-                    val data = json.optJSONObject("data") ?: return@forEach
+                    val data = json.optJSONObject("data") ?: continue@parseLoop
                     val filePath = extractRipgrepPath(data)
                     if (!filePath.isNullOrBlank()) {
                         flushBlock(filePath)
+                        if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                            break@parseLoop
+                        }
                     }
                 }
                 "summary" -> {
@@ -472,12 +515,22 @@ open class StandardFileSystemTools(protected val context: Context) {
                         json.optJSONObject("data")
                             ?.optJSONObject("stats")
                             ?.optInt("searches")
-                    currentBlocks.keys.toList().forEach { flushBlock(it) }
+                    for (filePath in currentBlocks.keys.toList()) {
+                        flushBlock(filePath)
+                        if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                            break
+                        }
+                    }
                 }
             }
         }
 
-        currentBlocks.keys.toList().forEach { flushBlock(it) }
+        for (filePath in currentBlocks.keys.toList()) {
+            flushBlock(filePath)
+            if (effectiveMaxBlocks != null && blocks.size >= effectiveMaxBlocks) {
+                break
+            }
+        }
         return Pair(blocks, summarySearches ?: seenFiles.size)
     }
 
@@ -910,6 +963,24 @@ open class StandardFileSystemTools(protected val context: Context) {
         envLabel: String
     ): ToolResult {
         return try {
+            val effectiveMaxResults = maxResults.coerceAtLeast(0)
+            if (effectiveMaxResults == 0) {
+                ToolProgressBus.update(toolName, 1f, "Search completed")
+                return ToolResult(
+                    toolName = toolName,
+                    success = true,
+                    result = GrepResultData(
+                        searchPath = path,
+                        pattern = pattern,
+                        matches = emptyList(),
+                        totalMatches = 0,
+                        filesSearched = 0,
+                        env = envLabel
+                    ),
+                    error = ""
+                )
+            }
+
             ToolProgressBus.update(toolName, 0.05f, "Running ripgrep...")
             val command =
                 buildRipgrepCodeCommand(
@@ -917,7 +988,8 @@ open class StandardFileSystemTools(protected val context: Context) {
                     pattern = pattern,
                     filePattern = filePattern,
                     caseInsensitive = caseInsensitive,
-                    contextLines = contextLines
+                    contextLines = contextLines,
+                    maxResults = effectiveMaxResults
                 )
             val commandResult =
                 executeRipgrepCommand(
@@ -927,8 +999,6 @@ open class StandardFileSystemTools(protected val context: Context) {
                 )
             val output = commandResult.output
 
-            ToolProgressBus.update(toolName, 0.7f, "Parsing ripgrep results...")
-            val (parsedBlocks, filesSearched) = parseRipgrepBlocks(output)
             if (commandResult.exitCode > 1) {
                 return ToolResult(
                     toolName = toolName,
@@ -937,7 +1007,24 @@ open class StandardFileSystemTools(protected val context: Context) {
                     error = buildRipgrepFailureMessage(output, commandResult.exitCode)
                 )
             }
-            val limitedBlocks = parsedBlocks.take(maxResults.coerceAtLeast(0))
+
+            ToolProgressBus.update(toolName, 0.7f, "Parsing ripgrep results...")
+            val (parsedBlocks, filesSearched) =
+                try {
+                    withTimeout(RIPGREP_PARSE_TIMEOUT_MS) {
+                        parseRipgrepBlocks(output, maxBlocks = effectiveMaxResults)
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    AppLogger.w(TAG, "grep_code ripgrep output parsing timed out", e)
+                    ToolProgressBus.update(toolName, 1f, "Search failed")
+                    return ToolResult(
+                        toolName = toolName,
+                        success = false,
+                        result = StringResultData(""),
+                        error = "grep_code timed out while parsing ripgrep results"
+                    )
+                }
+            val limitedBlocks = parsedBlocks.take(effectiveMaxResults)
             val fileMatches = groupRipgrepBlocks(limitedBlocks)
             ToolProgressBus.update(toolName, 1f, "Search completed")
 
@@ -3880,12 +3967,18 @@ open class StandardFileSystemTools(protected val context: Context) {
         val sourcePath = tool.parameters.find { it.name == "source" }?.value ?: ""
         val zipPath = tool.parameters.find { it.name == "destination" }?.value ?: ""
         val environment = tool.parameters.find { it.name == "environment" }?.value
+        val includeRootDirectoryParameter = tool.parameters.find { it.name == "include_root_directory" }
         val includeRootDirectory =
-            when (tool.parameters.find { it.name == "include_root_directory" }?.value?.trim()?.lowercase()) {
-                null, "" -> true
-                "true", "1", "yes", "y", "on" -> true
-                "false", "0", "no", "n", "off" -> false
-                else -> true
+            if (includeRootDirectoryParameter == null) {
+                true
+            } else {
+                includeRootDirectoryParameter.value.toBooleanStrictOrNull()
+                    ?: return ToolResult(
+                        toolName = tool.name,
+                        success = false,
+                        result = StringResultData(""),
+                        error = "include_root_directory must be true or false"
+                    )
             }
         PathValidator.validateAndroidPath(sourcePath, tool.name, "source")?.let { return it }
         PathValidator.validateAndroidPath(zipPath, tool.name, "destination")?.let { return it }
@@ -4178,6 +4271,54 @@ open class StandardFileSystemTools(protected val context: Context) {
         } finally {
             ToolProgressBus.clear()
         }
+    }
+
+    /** Create a file by delegating to apply_file with type=create */
+    open suspend fun createFile(tool: AITool): ToolResult {
+        val path = tool.parameters.find { it.name == "path" }?.value ?: ""
+        val environment = tool.parameters.find { it.name == "environment" }?.value
+        val newContent = tool.parameters.find { it.name == "new" }?.value ?: ""
+
+        val applyResult = applyFile(
+            AITool(
+                name = "apply_file",
+                parameters = listOfNotNull(
+                    ToolParameter("path", path),
+                    ToolParameter("type", "create"),
+                    ToolParameter("new", newContent),
+                    environment?.takeIf { it.isNotBlank() }?.let { ToolParameter("environment", it) }
+                )
+            )
+        ).last()
+
+        return wrapApplyFileResult(tool.name, applyResult)
+    }
+
+    /** Edit a file by delegating to apply_file with type=replace */
+    open suspend fun editFile(tool: AITool): ToolResult {
+        val path = tool.parameters.find { it.name == "path" }?.value ?: ""
+        val environment = tool.parameters.find { it.name == "environment" }?.value
+        val oldContent = tool.parameters.find { it.name == "old" }?.value ?: ""
+        val newContent = tool.parameters.find { it.name == "new" }?.value ?: ""
+
+        val applyResult = applyFile(
+            AITool(
+                name = "apply_file",
+                parameters = listOfNotNull(
+                    ToolParameter("path", path),
+                    ToolParameter("type", "replace"),
+                    ToolParameter("old", oldContent),
+                    ToolParameter("new", newContent),
+                    environment?.takeIf { it.isNotBlank() }?.let { ToolParameter("environment", it) }
+                )
+            )
+        ).last()
+
+        return wrapApplyFileResult(tool.name, applyResult)
+    }
+
+    private fun wrapApplyFileResult(toolName: String, applyResult: ToolResult): ToolResult {
+        return applyResult.copy(toolName = toolName)
     }
 
     /**

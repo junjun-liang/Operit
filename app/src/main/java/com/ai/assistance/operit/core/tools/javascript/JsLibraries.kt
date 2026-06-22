@@ -44,7 +44,7 @@ internal fun buildRuntimeBootstrapModules(
         module(
             fileName = "quickjs/init/third-party-libs.js",
             source = getJsThirdPartyLibraries(),
-            globals = listOf("_", "dataUtils")
+            globals = listOf("_", "dataUtils", "Icons")
         ),
         module(
             fileName = "assets/js/CryptoJS.js",
@@ -162,5 +162,17 @@ internal fun getJsThirdPartyLibraries(): String {
                 ].join(':');
             }
         };
+
+        var Icons =
+            typeof Proxy === 'function'
+                ? new Proxy({}, {
+                    get: function(_target, key) {
+                        if (typeof key !== 'string') {
+                            return '';
+                        }
+                        return key;
+                    }
+                })
+                : {};
     """.trimIndent()
 }

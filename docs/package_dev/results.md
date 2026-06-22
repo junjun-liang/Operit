@@ -82,6 +82,14 @@
 - `AppOperationData`
 - `AppListData`
 - `AppUsageTimeResultData`
+- `BluetoothStateData`
+- `BluetoothBondedDevicesData`
+- `BluetoothScanResultData`
+- `BluetoothSessionData`
+- `BluetoothTransferData`
+- `BluetoothReadData`
+- `BluetoothBleServicesData`
+- `BluetoothBleNotificationData`
 - `NotificationData`
 - `LocationData`
 - `DeviceInfoResultData`
@@ -91,6 +99,14 @@
 - `SystemSettingData` 包含 `namespace`、`setting`、`value`
 - `AppOperationData` 包含 `operationType`、`packageName`、`success`、`details`
 - `AppUsageTimeResultData` 包含时间窗口、是否包含系统应用以及每个应用的前台使用时长条目
+- `BluetoothStateData` 包含设备是否支持蓝牙、是否已开启以及当前状态
+- `BluetoothBondedDevicesData` 包含已配对蓝牙设备列表
+- `BluetoothScanResultData` 包含扫描到的设备列表、来源和 RSSI
+- `BluetoothSessionData` 包含蓝牙会话 ID、地址和模式
+- `BluetoothTransferData` 包含写入字节数
+- `BluetoothReadData` 包含读取字节数、UTF-8 文本和 base64 字节
+- `BluetoothBleServicesData` 包含 BLE service 与 characteristic 列表
+- `BluetoothBleNotificationData` 包含已收到的 BLE 通知列表
 - `NotificationData` 提供通知列表和抓取时间戳
 - `LocationData` 提供经纬度、精度、地址等信息
 

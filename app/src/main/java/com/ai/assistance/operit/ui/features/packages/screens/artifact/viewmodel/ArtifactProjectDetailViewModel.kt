@@ -282,16 +282,18 @@ class ArtifactProjectDetailViewModel(
         val text = body.trim()
         if (text.isBlank()) return
 
-        if (!isLoggedIn.value) {
-            _errorMessage.value = "GitHub login required"
-            return
+        viewModelScope.launch {
+            if (!githubAuth.isLoggedIn()) {
+                _errorMessage.value = "GitHub login required"
+                return@launch
+            }
+            currentIssueInteractionController()?.postIssueComment(
+                issueNumber = issueNumber,
+                body = text,
+                successBehavior = CommentPostSuccessBehavior.RELOAD_FROM_SERVER,
+                perPage = 50
+            )
         }
-        currentIssueInteractionController()?.postIssueComment(
-            issueNumber = issueNumber,
-            body = text,
-            successBehavior = CommentPostSuccessBehavior.RELOAD_FROM_SERVER,
-            perPage = 50
-        )
     }
 
     fun loadIssueReactions(
@@ -305,11 +307,13 @@ class ArtifactProjectDetailViewModel(
         issueNumber: Int,
         reactionType: String
     ) {
-        if (!isLoggedIn.value) {
-            _errorMessage.value = "GitHub login required"
-            return
+        viewModelScope.launch {
+            if (!githubAuth.isLoggedIn()) {
+                _errorMessage.value = "GitHub login required"
+                return@launch
+            }
+            currentIssueInteractionController()?.addReactionToIssue(issueNumber, reactionType)
         }
-        currentIssueInteractionController()?.addReactionToIssue(issueNumber, reactionType)
     }
 
     fun clearError() {

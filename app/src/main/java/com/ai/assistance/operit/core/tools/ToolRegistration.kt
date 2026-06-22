@@ -401,6 +401,85 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             }
     )
 
+    // 音乐播放工具
+    val musicPlaybackTools = ToolGetter.getMusicPlaybackTools(context)
+
+    handler.registerTool(
+            name = "music_play",
+            descriptionGenerator = { tool ->
+                val source = tool.parameters.find { it.name == "source" }?.value ?: ""
+                "Play music: $source"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.play(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_play_queue",
+            descriptionGenerator = { tool ->
+                val items = tool.parameters.find { it.name == "items" }?.value ?: ""
+                "Play music queue: $items"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.playQueue(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_pause",
+            descriptionGenerator = { _ -> "Pause music playback" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.pause(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_resume",
+            descriptionGenerator = { _ -> "Resume music playback" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.resume(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_stop",
+            descriptionGenerator = { _ -> "Stop music playback" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.stop(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_seek",
+            descriptionGenerator = { tool ->
+                val positionMs = tool.parameters.find { it.name == "position_ms" }?.value ?: ""
+                "Seek music playback to ${positionMs}ms"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.seek(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_set_volume",
+            descriptionGenerator = { tool ->
+                val volume = tool.parameters.find { it.name == "volume" }?.value ?: ""
+                "Set music playback volume to $volume"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.setVolume(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "music_status",
+            descriptionGenerator = { _ -> "Get music playback status" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { musicPlaybackTools.status(tool) }
+            }
+    )
+
     handler.registerTool(
             name = "read_environment_variable",
             descriptionGenerator = { tool ->
@@ -1937,6 +2016,28 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     }
     )
 
+    handler.registerTool(
+            name = "create_file",
+            descriptionGenerator = { tool ->
+                val path = tool.parameters.find { it.name == "path" }?.value ?: ""
+                val environment = tool.parameters.find { it.name == "environment" }?.value
+                val envInfo = formatEnvInfo(environment)
+                "Create file $path$envInfo"
+            },
+            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.createFile(tool) } }
+    )
+
+    handler.registerTool(
+            name = "edit_file",
+            descriptionGenerator = { tool ->
+                val path = tool.parameters.find { it.name == "path" }?.value ?: ""
+                val environment = tool.parameters.find { it.name == "environment" }?.value
+                val envInfo = formatEnvInfo(environment)
+                "Edit file $path$envInfo"
+            },
+            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.editFile(tool) } }
+    )
+
     // 压缩文件/目录
     handler.registerTool(
             name = "zip_files",
@@ -2191,6 +2292,198 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) { systemOperationTools.getDeviceLocation(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "request_bluetooth_permission",
+            descriptionGenerator = { _ -> "Request Bluetooth nearby devices permission" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.requestBluetoothPermission(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "get_bluetooth_state",
+            descriptionGenerator = { _ -> "Get Bluetooth adapter state" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.getBluetoothState(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "request_enable_bluetooth",
+            descriptionGenerator = { _ -> "Open the system dialog to enable Bluetooth" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.requestEnableBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "list_bluetooth_bonded_devices",
+            descriptionGenerator = { _ -> "List bonded Bluetooth devices" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.listBluetoothBondedDevices(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "scan_bluetooth_devices",
+            descriptionGenerator = { _ -> "Scan nearby Bluetooth classic and BLE devices" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.scanBluetoothDevices(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_connect",
+            descriptionGenerator = { tool ->
+                val address = tool.parameters.find { it.name == "address" }?.value ?: ""
+                "Connect to Bluetooth classic device $address"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.connectBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_listen",
+            descriptionGenerator = { _ -> "Listen for an incoming Bluetooth classic connection" },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.listenBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_accept",
+            descriptionGenerator = { tool ->
+                val listenerId = tool.parameters.find { it.name == "listener_session_id" }?.value ?: ""
+                "Accept an incoming Bluetooth classic connection from listener $listenerId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.acceptBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_send",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Send data to Bluetooth session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.sendBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_read",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Read data from Bluetooth session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.readBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_send_and_read",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Send data and read response from Bluetooth session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.sendAndReadBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_close",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Close Bluetooth session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.closeBluetooth(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_connect",
+            descriptionGenerator = { tool ->
+                val address = tool.parameters.find { it.name == "address" }?.value ?: ""
+                "Connect to BLE device $address"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.connectBle(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_discover_services",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Discover BLE services for session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.discoverBleServices(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_read_characteristic",
+            descriptionGenerator = { tool ->
+                val characteristicUuid = tool.parameters.find { it.name == "characteristic_uuid" }?.value ?: ""
+                "Read BLE characteristic $characteristicUuid"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.readBleCharacteristic(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_write_characteristic",
+            descriptionGenerator = { tool ->
+                val characteristicUuid = tool.parameters.find { it.name == "characteristic_uuid" }?.value ?: ""
+                "Write BLE characteristic $characteristicUuid"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.writeBleCharacteristic(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_write_and_read_characteristic",
+            descriptionGenerator = { tool ->
+                val writeCharacteristicUuid = tool.parameters.find { it.name == "write_characteristic_uuid" }?.value ?: ""
+                val readCharacteristicUuid = tool.parameters.find { it.name == "read_characteristic_uuid" }?.value ?: ""
+                "Write BLE characteristic $writeCharacteristicUuid and read $readCharacteristicUuid"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.writeAndReadBleCharacteristic(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_subscribe_characteristic",
+            descriptionGenerator = { tool ->
+                val characteristicUuid = tool.parameters.find { it.name == "characteristic_uuid" }?.value ?: ""
+                "Subscribe BLE characteristic $characteristicUuid"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.subscribeBleCharacteristic(tool) }
+            }
+    )
+
+    handler.registerTool(
+            name = "bluetooth_ble_read_notifications",
+            descriptionGenerator = { tool ->
+                val sessionId = tool.parameters.find { it.name == "session_id" }?.value ?: ""
+                "Read BLE notifications from session $sessionId"
+            },
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) { systemOperationTools.readBleNotifications(tool) }
             }
     )
 

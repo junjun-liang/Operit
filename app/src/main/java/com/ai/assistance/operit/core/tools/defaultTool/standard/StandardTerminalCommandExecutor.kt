@@ -153,11 +153,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                     AppLogger.d(TAG, "Command output collected: '$fullOutput', exitCode: $exitCode")
                     val errorMessage =
                             when {
-                                didTimeout ->
-                                        context.getString(
-                                                R.string.terminal_error_command_timeout,
-                                                timeout
-                                        )
+                                didTimeout -> null
                                 !hasCompleted -> context.getString(R.string.terminal_error_command_failed)
                                 else -> null
                             }
@@ -305,11 +301,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
             val fullOutput = completionOutput?.takeIf { it.isNotEmpty() } ?: events.joinToString("")
             val errorMessage =
                 when {
-                    didTimeout ->
-                        context.getString(
-                            R.string.terminal_error_command_timeout,
-                            timeout
-                        )
+                    didTimeout -> null
                     !hasCompleted -> context.getString(R.string.terminal_error_command_failed)
                     else -> null
                 }
@@ -381,11 +373,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                 val didTimeout = hiddenResult.state == HiddenExecResult.State.TIMEOUT
                 val errorMessage =
                     when {
-                        didTimeout ->
-                            context.getString(
-                                R.string.terminal_error_hidden_command_timeout,
-                                timeoutMs
-                            )
+                        didTimeout -> null
                         !hiddenResult.isOk ->
                             context.getString(
                                 R.string.terminal_error_execute_hidden_command,

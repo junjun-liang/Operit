@@ -1,10 +1,12 @@
 package com.ai.assistance.operit.core.tools.defaultTool.standard
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager
+import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -14,15 +16,20 @@ import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
 import androidx.core.app.NotificationCompat
+import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.core.tools.AppListData
 import com.ai.assistance.operit.core.tools.AppOperationData
 import com.ai.assistance.operit.core.tools.AppUsageTimeEntry
 import com.ai.assistance.operit.core.tools.AppUsageTimeResultData
+import com.ai.assistance.operit.core.tools.BluetoothBondedDevicesData
+import com.ai.assistance.operit.core.tools.BluetoothDeviceData
+import com.ai.assistance.operit.core.tools.BluetoothStateData
 import com.ai.assistance.operit.core.tools.LocationData
 import com.ai.assistance.operit.core.tools.NotificationData
 import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.SystemSettingData
+import com.ai.assistance.operit.core.tools.defaultTool.websession.browser.WebSessionPermissionRequestCoordinator
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolResult
@@ -51,7 +58,6 @@ open class StandardSystemOperationTools(private val context: Context) {
 
     companion object {
         private const val TAG = "SystemOperationTools"
-        private const val OPERIT_PACKAGE = "com.ai.assistance.operit"
 
         private const val AI_REPLY_CHANNEL_ID = "AI_REPLY_CHANNEL"
         private const val AI_REPLY_CHANNEL_NAME = "Chat Completion Reminder"
@@ -59,8 +65,9 @@ open class StandardSystemOperationTools(private val context: Context) {
 
     private fun isOperitInternalPath(path: String): Boolean {
         val normalizedPath = path.trim()
-        return normalizedPath.startsWith("/data/data/$OPERIT_PACKAGE") ||
-            AndroidUserPathUtils.isCurrentUserPackageDataPath(normalizedPath, OPERIT_PACKAGE)
+        val appPackage = BuildConfig.APPLICATION_ID
+        return normalizedPath.startsWith("/data/data/$appPackage") ||
+            AndroidUserPathUtils.isCurrentUserPackageDataPath(normalizedPath, appPackage)
     }
 
     private fun stageApkForInstallIfNeeded(apkFile: File): File {
@@ -806,6 +813,597 @@ open class StandardSystemOperationTools(private val context: Context) {
                 result = StringResultData(""),
                 error = "Error getting app usage time: ${e.message}"
             )
+        }
+    }
+
+    private fun getBluetoothAdapter(): BluetoothAdapter? {
+        return BluetoothSessionManager.adapter(context)
+    }
+
+    private fun needsBluetoothConnectPermission(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    }
+
+    private fun hasBluetoothConnectPermission(): Boolean {
+        if (!needsBluetoothConnectPermission()) {
+            return true
+        }
+        return context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+                PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasBluetoothScanPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) ==
+                    PackageManager.PERMISSION_GRANTED
+        }
+        return context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+                context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                        PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requiredBluetoothPermissions(): List<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
+
+    private fun bluetoothConnectPermissionError(toolName: String): ToolResult {
+        return ToolResult(
+                toolName = toolName,
+                success = false,
+                result = StringResultData(""),
+                error = "Bluetooth nearby devices permission is required. Call request_bluetooth_permission first."
+        )
+    }
+
+    private fun bluetoothScanPermissionError(toolName: String): ToolResult {
+        return ToolResult(
+                toolName = toolName,
+                success = false,
+                result = StringResultData(""),
+                error = "Bluetooth scan permission is required. Call request_bluetooth_permission first."
+        )
+    }
+
+    private fun bluetoothStateName(state: Int): String {
+        return when (state) {
+            BluetoothAdapter.STATE_OFF -> "off"
+            BluetoothAdapter.STATE_TURNING_ON -> "turning_on"
+            BluetoothAdapter.STATE_ON -> "on"
+            BluetoothAdapter.STATE_TURNING_OFF -> "turning_off"
+            else -> "unknown"
+        }
+    }
+
+    private fun bluetoothDeviceTypeName(type: Int): String {
+        return BluetoothSessionManager.deviceTypeName(type)
+    }
+
+    private fun bluetoothBondStateName(state: Int): String {
+        return BluetoothSessionManager.bondStateName(state)
+    }
+
+    open suspend fun requestBluetoothPermission(tool: AITool): ToolResult {
+        if (hasBluetoothConnectPermission() && hasBluetoothScanPermission()) {
+            return ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = StringResultData("Bluetooth permission granted")
+            )
+        }
+
+        val results =
+                WebSessionPermissionRequestCoordinator.requestPermissions(
+                        context,
+                        requiredBluetoothPermissions()
+                )
+        val granted =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    results[Manifest.permission.BLUETOOTH_CONNECT] == true &&
+                            results[Manifest.permission.BLUETOOTH_SCAN] == true
+                } else {
+                    results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                            results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                }
+        return ToolResult(
+                toolName = tool.name,
+                success = granted,
+                result = StringResultData(if (granted) "Bluetooth permission granted" else ""),
+                error = if (granted) "" else "Bluetooth nearby devices permission was denied."
+        )
+    }
+
+    open suspend fun getBluetoothState(tool: AITool): ToolResult {
+        val adapter = getBluetoothAdapter()
+        if (adapter == null) {
+            return ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothStateData(supported = false, enabled = false, state = "unsupported"),
+                    error = ""
+            )
+        }
+
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            val stateName = bluetoothStateName(adapter.state)
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result =
+                            BluetoothStateData(
+                                    supported = true,
+                                    enabled = adapter.isEnabled,
+                                    state = stateName
+                            ),
+                    error = ""
+            )
+        } catch (e: SecurityException) {
+            AppLogger.e(TAG, "读取蓝牙状态时出现权限异常", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Security exception when reading Bluetooth state: ${e.message}"
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "读取蓝牙状态时出错", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error reading Bluetooth state: ${e.message}"
+            )
+        }
+    }
+
+    open suspend fun requestEnableBluetooth(tool: AITool): ToolResult {
+        val adapter = getBluetoothAdapter()
+        if (adapter == null) {
+            return ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Bluetooth is not supported on this device."
+            )
+        }
+
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            if (adapter.isEnabled) {
+                return ToolResult(
+                        toolName = tool.name,
+                        success = true,
+                        result = StringResultData("Bluetooth is already enabled"),
+                        error = ""
+                )
+            }
+
+            withContext(Dispatchers.Main) {
+                val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = StringResultData("Bluetooth enable request opened"),
+                    error = ""
+            )
+        } catch (e: SecurityException) {
+            AppLogger.e(TAG, "请求开启蓝牙时出现权限异常", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Security exception when requesting Bluetooth enable: ${e.message}"
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "请求开启蓝牙时出错", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error requesting Bluetooth enable: ${e.message}"
+            )
+        }
+    }
+
+    open suspend fun listBluetoothBondedDevices(tool: AITool): ToolResult {
+        val adapter = getBluetoothAdapter()
+        if (adapter == null) {
+            return ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Bluetooth is not supported on this device."
+            )
+        }
+
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            val devices =
+                    adapter.bondedDevices
+                            .map { device ->
+                                BluetoothDeviceData(
+                                        name = device.name,
+                                        address = device.address,
+                                        type = bluetoothDeviceTypeName(device.type),
+                                        bondState = bluetoothBondStateName(device.bondState)
+                                )
+                            }
+                            .sortedWith(compareBy<BluetoothDeviceData> { it.name ?: "" }.thenBy { it.address })
+
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothBondedDevicesData(devices),
+                    error = ""
+            )
+        } catch (e: SecurityException) {
+            AppLogger.e(TAG, "读取已配对蓝牙设备时出现权限异常", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Security exception when listing bonded Bluetooth devices: ${e.message}"
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "读取已配对蓝牙设备时出错", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error listing bonded Bluetooth devices: ${e.message}"
+            )
+        }
+    }
+
+    open suspend fun scanBluetoothDevices(tool: AITool): ToolResult {
+        val durationMs = tool.parameters.find { it.name == "duration_ms" }?.value?.toLongOrNull() ?: 10000L
+        val includeBle = tool.parameters.find { it.name == "include_ble" }?.value?.toBoolean() ?: true
+
+        if (!hasBluetoothScanPermission()) {
+            return bluetoothScanPermissionError(tool.name)
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.scan(context, durationMs, includeBle),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "扫描蓝牙设备时出错", e)
+            ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error scanning Bluetooth devices: ${e.message}"
+            )
+        }
+    }
+
+    open suspend fun connectBluetooth(tool: AITool): ToolResult {
+        val address = tool.parameters.find { it.name == "address" }?.value?.trim().orEmpty()
+        val uuid = tool.parameters.find { it.name == "uuid" }?.value
+        if (address.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide address parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.connectClassic(context, address, BluetoothSessionManager.parseUuid(uuid)),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "连接蓝牙设备时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error connecting Bluetooth device: ${e.message}")
+        }
+    }
+
+    open suspend fun listenBluetooth(tool: AITool): ToolResult {
+        val name = tool.parameters.find { it.name == "name" }?.value?.takeIf { it.isNotBlank() } ?: "Operit Bluetooth"
+        val uuid = tool.parameters.find { it.name == "uuid" }?.value
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.listenClassic(context, name, BluetoothSessionManager.parseUuid(uuid)),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "创建蓝牙监听时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error listening for Bluetooth connections: ${e.message}")
+        }
+    }
+
+    open suspend fun acceptBluetooth(tool: AITool): ToolResult {
+        val listenerId = tool.parameters.find { it.name == "listener_session_id" }?.value?.trim().orEmpty()
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toIntOrNull() ?: 30000
+        if (listenerId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide listener_session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.acceptClassic(listenerId, timeoutMs),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "接受蓝牙连接时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error accepting Bluetooth connection: ${e.message}")
+        }
+    }
+
+    private fun bluetoothPayload(tool: AITool): ByteArray {
+        val text = tool.parameters.find { it.name == "text" }?.value
+        val dataBase64 = tool.parameters.find { it.name == "data_base64" }?.value
+        return BluetoothSessionManager.decodePayload(text, dataBase64)
+    }
+
+    open suspend fun sendBluetooth(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.sendClassic(sessionId, bluetoothPayload(tool)),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "发送蓝牙数据时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error sending Bluetooth data: ${e.message}")
+        }
+    }
+
+    open suspend fun readBluetooth(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val maxBytes = tool.parameters.find { it.name == "max_bytes" }?.value?.toIntOrNull() ?: 4096
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toLongOrNull() ?: 3000L
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.readClassic(sessionId, maxBytes, timeoutMs),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "读取蓝牙数据时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error reading Bluetooth data: ${e.message}")
+        }
+    }
+
+    open suspend fun sendAndReadBluetooth(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val maxBytes = tool.parameters.find { it.name == "max_bytes" }?.value?.toIntOrNull() ?: 4096
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toLongOrNull() ?: 3000L
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.sendAndReadClassic(sessionId, bluetoothPayload(tool), maxBytes, timeoutMs),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "发送并读取蓝牙数据时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error sending and reading Bluetooth data: ${e.message}")
+        }
+    }
+
+    open suspend fun closeBluetooth(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        return try {
+            BluetoothSessionManager.closeAny(sessionId)
+            ToolResult(toolName = tool.name, success = true, result = StringResultData("Bluetooth session closed"), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "关闭蓝牙会话时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error closing Bluetooth session: ${e.message}")
+        }
+    }
+
+    open suspend fun connectBle(tool: AITool): ToolResult {
+        val address = tool.parameters.find { it.name == "address" }?.value?.trim().orEmpty()
+        val autoConnect = tool.parameters.find { it.name == "auto_connect" }?.value?.toBoolean() ?: false
+        if (address.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide address parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+
+        return try {
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = BluetoothSessionManager.connectBle(context, address, autoConnect),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "连接 BLE 设备时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error connecting BLE device: ${e.message}")
+        }
+    }
+
+    open suspend fun discoverBleServices(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toLongOrNull() ?: 10000L
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            ToolResult(toolName = tool.name, success = true, result = BluetoothSessionManager.discoverBleServices(sessionId, timeoutMs), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "发现 BLE 服务时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error discovering BLE services: ${e.message}")
+        }
+    }
+
+    private fun uuidParameter(tool: AITool, name: String) =
+            java.util.UUID.fromString(tool.parameters.find { it.name == name }?.value?.trim().orEmpty())
+
+    private fun serviceUuid(tool: AITool) = uuidParameter(tool, "service_uuid")
+
+    private fun characteristicUuid(tool: AITool) = uuidParameter(tool, "characteristic_uuid")
+
+    open suspend fun readBleCharacteristic(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toLongOrNull() ?: 5000L
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            ToolResult(toolName = tool.name, success = true, result = BluetoothSessionManager.readBleCharacteristic(sessionId, serviceUuid(tool), characteristicUuid(tool), timeoutMs), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "读取 BLE 特征时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error reading BLE characteristic: ${e.message}")
+        }
+    }
+
+    open suspend fun writeBleCharacteristic(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            ToolResult(toolName = tool.name, success = true, result = BluetoothSessionManager.writeBleCharacteristic(sessionId, serviceUuid(tool), characteristicUuid(tool), bluetoothPayload(tool)), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "写入 BLE 特征时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error writing BLE characteristic: ${e.message}")
+        }
+    }
+
+    open suspend fun writeAndReadBleCharacteristic(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val timeoutMs = tool.parameters.find { it.name == "timeout_ms" }?.value?.toLongOrNull() ?: 5000L
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            BluetoothSessionManager.writeBleCharacteristic(
+                    sessionId,
+                    uuidParameter(tool, "write_service_uuid"),
+                    uuidParameter(tool, "write_characteristic_uuid"),
+                    bluetoothPayload(tool)
+            )
+            ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result =
+                            BluetoothSessionManager.readBleCharacteristic(
+                                    sessionId,
+                                    uuidParameter(tool, "read_service_uuid"),
+                                    uuidParameter(tool, "read_characteristic_uuid"),
+                                    timeoutMs
+                            ),
+                    error = ""
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "写入并读取 BLE 特征时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error writing and reading BLE characteristic: ${e.message}")
+        }
+    }
+
+    open suspend fun subscribeBleCharacteristic(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val enable = tool.parameters.find { it.name == "enable" }?.value?.toBoolean() ?: true
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            ToolResult(toolName = tool.name, success = true, result = BluetoothSessionManager.subscribeBleCharacteristic(sessionId, serviceUuid(tool), characteristicUuid(tool), enable), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "订阅 BLE 特征时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error subscribing BLE characteristic: ${e.message}")
+        }
+    }
+
+    open suspend fun readBleNotifications(tool: AITool): ToolResult {
+        val sessionId = tool.parameters.find { it.name == "session_id" }?.value?.trim().orEmpty()
+        val limit = tool.parameters.find { it.name == "limit" }?.value?.toIntOrNull() ?: 20
+        if (sessionId.isBlank()) {
+            return ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Must provide session_id parameter")
+        }
+        if (!hasBluetoothConnectPermission()) {
+            return bluetoothConnectPermissionError(tool.name)
+        }
+        return try {
+            ToolResult(toolName = tool.name, success = true, result = BluetoothSessionManager.readBleNotifications(sessionId, limit), error = "")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "读取 BLE 通知时出错", e)
+            ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Error reading BLE notifications: ${e.message}")
         }
     }
 

@@ -60,10 +60,15 @@ fun WaifuModeSettingsScreen(
     // 状态
     var showSaveSuccess by remember { mutableStateOf(false) }
     val isWaifuModeEnabled = waifuPreferences.enableWaifuModeFlow.collectAsState(initial = false).value
-    val charDelay = waifuPreferences.waifuCharDelayFlow.collectAsState(initial = 500).value
+    val charDelay = waifuPreferences.waifuCharDelayFlow.collectAsState(initial = 250).value
     val removePunctuation = waifuPreferences.waifuRemovePunctuationFlow.collectAsState(initial = false).value
     val enableEmoticons = waifuPreferences.waifuEnableEmoticonsFlow.collectAsState(initial = false).value
     val enableSelfie = waifuPreferences.waifuEnableSelfieFlow.collectAsState(initial = false).value
+    val enableMergeSend = waifuPreferences.waifuEnableMergeSendFlow.collectAsState(initial = false).value
+    val mergeSendDelayMs =
+        waifuPreferences.waifuMergeSendDelayMsFlow.collectAsState(
+            initial = WaifuPreferences.DEFAULT_WAIFU_MERGE_SEND_DELAY_MS
+        ).value
     val waifuCustomPrompt = waifuPreferences.waifuCustomPromptFlow.collectAsState(initial = "").value
     val selfiePrompt = waifuPreferences.waifuSelfiePromptFlow.collectAsState(initial = "").value
     
@@ -214,8 +219,78 @@ fun WaifuModeSettingsScreen(
                 }
             }
 
-            // 延迟时间配置（仅在waifu模式启用时显示）
-            if (isWaifuModeEnabled) {
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.waifu_merge_send),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = stringResource(R.string.waifu_merge_send_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+
+                        Switch(
+                            checked = enableMergeSend,
+                            onCheckedChange = { enabled ->
+                                saveSettings {
+                                    waifuPreferences.saveWaifuEnableMergeSend(enabled)
+                                }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(R.string.waifu_merge_send_delay),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.waifu_merge_send_delay_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.waifu_merge_send_delay_format, mergeSendDelayMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Slider(
+                        value = mergeSendDelayMs.toFloat(),
+                        onValueChange = { newDelay ->
+                            saveSettings {
+                                waifuPreferences.saveWaifuMergeSendDelayMs(newDelay.toInt())
+                            }
+                        },
+                        valueRange = 500f..10000f,
+                        steps = 94,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            // 延迟时间配置
                 Card(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -282,10 +357,8 @@ fun WaifuModeSettingsScreen(
                         )
                     }
                 }
-            }
 
-            // 标点符号配置（仅在waifu模式启用时显示）
-            if (isWaifuModeEnabled) {
+            // 标点符号配置
                 Card(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -324,10 +397,8 @@ fun WaifuModeSettingsScreen(
                         }
                     }
                 }
-            }
 
-            // Waifu提示词配置（仅在waifu模式启用时显示）
-            if (isWaifuModeEnabled) {
+            // Waifu提示词配置
                 var customPromptText by remember { mutableStateOf(waifuCustomPrompt) }
 
                 LaunchedEffect(waifuCustomPrompt) {
@@ -382,10 +453,8 @@ fun WaifuModeSettingsScreen(
                         )
                     }
                 }
-            }
 
-            // 表情包配置（仅在waifu模式启用时显示）
-            if (isWaifuModeEnabled) {
+            // 表情包配置
                 Card(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -469,10 +538,8 @@ fun WaifuModeSettingsScreen(
                         )
                     }
                 }
-            }
 
-            // 自拍功能配置（仅在waifu模式启用时显示）
-            if (isWaifuModeEnabled) {
+            // 自拍功能配置
                 Card(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -556,7 +623,6 @@ fun WaifuModeSettingsScreen(
                         }
                     }
                 }
-            }
 
             // 功能说明
             Card(

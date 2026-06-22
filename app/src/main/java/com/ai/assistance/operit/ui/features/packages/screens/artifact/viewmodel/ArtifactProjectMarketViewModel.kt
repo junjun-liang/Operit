@@ -16,9 +16,11 @@ import com.ai.assistance.operit.ui.features.packages.market.GitHubIssueMarketSer
 import com.ai.assistance.operit.ui.features.packages.market.installArtifactProjectNode
 import com.ai.assistance.operit.ui.features.packages.market.LocalArtifactInstallStateKind
 import com.ai.assistance.operit.ui.features.packages.market.LocalInstalledArtifactSnapshot
+import com.ai.assistance.operit.ui.features.packages.market.MARKET_REVIEW_STATUS_LABELS
 import com.ai.assistance.operit.ui.features.packages.market.MarketSortOption
 import com.ai.assistance.operit.ui.features.packages.market.PublishArtifactType
 import com.ai.assistance.operit.ui.features.packages.market.getInstalledArtifactSnapshots
+import com.ai.assistance.operit.ui.features.packages.market.resolveArtifactReviewSnapshot
 import com.ai.assistance.operit.ui.features.packages.market.resolveLocalArtifactInstallState
 import com.ai.assistance.operit.ui.features.packages.market.sameArtifactRuntimePackageId
 import com.ai.assistance.operit.ui.features.packages.market.toMarketStatsType
@@ -204,7 +206,8 @@ class ArtifactProjectMarketViewModel(
     fun openProject(
         projectId: String,
         onOpenSingleNode: (GitHubIssue) -> Unit,
-        onOpenNodeTree: (ArtifactProjectDetailResponse) -> Unit
+        onOpenNodeTree: (ArtifactProjectDetailResponse) -> Unit,
+        onOpenFailed: () -> Unit = {}
     ) {
         viewModelScope.launch {
             try {
@@ -229,6 +232,7 @@ class ArtifactProjectMarketViewModel(
             } catch (e: Exception) {
                 _errorMessage.value = e.message ?: "Failed to open artifact project"
                 AppLogger.e(TAG, "Failed to open artifact project $projectId", e)
+                onOpenFailed()
             }
         }
     }
@@ -256,12 +260,19 @@ class ArtifactProjectMarketViewModel(
         try {
             val issues =
                 aggregateResults { service ->
-                    service.searchOpenIssues(rawQuery = query, page = 1)
+                    service.searchIssues(
+                        rawQuery = query,
+                        page = 1,
+                        openOnly = true,
+                        excludedLabels = MARKET_REVIEW_STATUS_LABELS.toList()
+                    )
                 }.getOrElse { error ->
                     throw error
                 }
+            val publiclyApprovedIssues =
+                issues.filter { issue -> issue.resolveArtifactReviewSnapshot().isPubliclyApproved }
             val browseByProject = _browseItems.value.associateBy { it.projectId }
-            val grouped = issues.groupBy { issue ->
+            val grouped = publiclyApprovedIssues.groupBy { issue ->
                 val parsed = ArtifactIssueParser.parseArtifactInfo(issue)
                 parsed.projectId.ifBlank { parsed.normalizedId }
             }
@@ -505,7 +516,8 @@ class ArtifactProjectMarketViewModel(
         sortOption: MarketSortOption
     ): List<ArtifactProjectRankEntryResponse> {
         return when (sortOption) {
-            MarketSortOption.UPDATED ->
+            MarketSortOption.UPDATED,
+            MarketSortOption.FEATURED ->
                 items.sortedWith(
                     compareByDescending<ArtifactProjectRankEntryResponse> { it.latestPublishedAt.orEmpty() }
                         .thenBy { it.projectDisplayName.lowercase() }
